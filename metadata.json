@@ -1,0 +1,6 @@
+{
+  "name": "Velox Drive — Luxury Car Rental",
+  "description": "Cinematic dark luxury car rental booking experience featuring interactive 3D vehicle assembly, premium fleet, seamless online booking, and verified chauffeur service.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

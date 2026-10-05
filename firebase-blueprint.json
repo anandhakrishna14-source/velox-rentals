@@ -1,0 +1,85 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Registered user profile and authentication record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique Firebase Auth User UID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "displayName": { "type": "string", "description": "Full name of the user" },
+        "photoURL": { "type": "string", "description": "Avatar photo URL" },
+        "role": { "type": "string", "enum": ["customer", "admin"], "description": "Authorization role" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "ISO timestamp of account creation" }
+      },
+      "required": ["id", "email", "role", "createdAt"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Luxury vehicle rental reservation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique reservation booking identifier" },
+        "userId": { "type": "string", "description": "UID of the reserving customer" },
+        "userEmail": { "type": "string", "format": "email", "description": "Customer contact email" },
+        "userName": { "type": "string", "description": "Customer full legal name" },
+        "vehicleId": { "type": "string", "description": "Marque slug of the vehicle" },
+        "vehicleName": { "type": "string", "description": "Formatted vehicle title" },
+        "pickupLocation": { "type": "string", "description": "Hub or airport delivery location" },
+        "dropoffLocation": { "type": "string", "description": "Return location" },
+        "pickupDate": { "type": "string", "description": "Pickup start date" },
+        "returnDate": { "type": "string", "description": "Return end date" },
+        "driverOption": { "type": "string", "enum": ["SELF_DRIVE", "CHAUFFEUR"], "description": "Driver preference" },
+        "totalAmount": { "type": "number", "description": "Total rental cost in base currency" },
+        "status": { "type": "string", "enum": ["UPCOMING", "ACTIVE", "COMPLETED", "CANCELLED"], "description": "Booking lifecycle state" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "ISO timestamp of reservation placement" }
+      },
+      "required": ["id", "userId", "vehicleId", "totalAmount", "status", "createdAt"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Verified guest review and rating for a fleet vehicle",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Review unique identifier" },
+        "vehicleId": { "type": "string", "description": "Referenced vehicle ID" },
+        "userId": { "type": "string", "description": "Author UID" },
+        "userName": { "type": "string", "description": "Author display name" },
+        "rating": { "type": "number", "description": "Rating score from 1 to 5" },
+        "comment": { "type": "string", "description": "Review text critique" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "ISO timestamp of review" }
+      },
+      "required": ["id", "vehicleId", "userId", "rating", "comment", "createdAt"]
+    },
+    "Favorite": {
+      "title": "Favorite",
+      "description": "Wishlisted vehicle bookmark for authenticated customer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Favorite bookmark identifier" },
+        "userId": { "type": "string", "description": "Owner user UID" },
+        "vehicleId": { "type": "string", "description": "Referenced vehicle ID" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when added" }
+      },
+      "required": ["id", "userId", "vehicleId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User account profiles"
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Fleet reservation contracts"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Customer ratings and feedback"
+    },
+    "/users/{userId}/favorites/{favoriteId}": {
+      "schema": "Favorite",
+      "description": "User wishlist bookmarks"
+    }
+  }
+}

@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-main: #050505;
+    --bg-secondary: #0B0B0B;
+    --bg-card: #111111;
+    --border-color: #292929;
+    --text-primary: #F5F5F5;
+    --text-secondary: #999999;
+    --accent: #C9A45C;
+    --accent-hover: #DFBD78;
+    --accent-glow: rgba(201, 164, 92, 0.25);
+    --success: #5ED39A;
+    --error: #E66A6A;
+  }
+
+  body {
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, .font-luxury {
+    font-family: 'Playfair Display', Georgia, serif;
+    letter-spacing: -0.01em;
+  }
+
+  .font-mono-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom delicate luxury scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #050505;
+}
+::-webkit-scrollbar-thumb {
+  background: #222222;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C9A45C;
+}
+
+/* Luxury card hover glow & border */
+.luxury-card {
+  background-color: #111111;
+  border: 1px solid #222222;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luxury-card:hover {
+  border-color: #C9A45C;
+  box-shadow: 0 10px 30px -10px rgba(201, 164, 92, 0.12);
+  transform: translateY(-2px);
+}
+
+.champagne-gradient-text {
+  background: linear-gradient(135deg, #FFF7E6 0%, #C9A45C 60%, #9F7B36 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.champagne-border {
+  border-color: #C9A45C;
+}
+
+/* MapLibre GL custom luxury popup & control styling */
+.maplibregl-popup-content {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 16px !important;
+}
+
+.maplibregl-popup-tip {
+  border-top-color: #0E0F14 !important;
+}
+
+.maplibregl-ctrl-group {
+  background: rgba(14, 15, 20, 0.85) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  backdrop-filter: blur(12px) !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6) !important;
+}
+
+.maplibregl-ctrl-group button {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.maplibregl-ctrl-group button:hover {
+  background: rgba(201, 164, 92, 0.25) !important;
+}
+
+.maplibregl-ctrl-icon {
+  filter: invert(1) brightness(1.2);
+}
+
+/* Subtle background noise texture or metallic line */
+.hairline-divider {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
