@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
-import { X, Heart, Shield, Check, Star, Gauge, Users, Zap, Fuel, Calendar, Compass, ArrowRight, Award, Layers, Play, Camera, Video, Box, Upload, Film } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Heart, Shield, Check, Star, Gauge, Users, Zap, Fuel, Calendar, Compass, ArrowRight, Award, Layers, Play, Camera, Video, Upload, Film, MessageSquare } from 'lucide-react';
 import { Vehicle } from '../types';
-import { VehicleViewer3D } from './3d/VehicleViewer3D';
 import { StudioTurntable3DSpace } from './StudioTurntable3DSpace';
 import { BlueprintVideoViewer } from './BlueprintVideoViewer';
+import { openWhatsAppEnquiry, getUpcomingDateString } from '../utils/whatsapp';
+import { persistMediaItem, retrieveMediaItem } from '../utils/persistentStorage';
+import { INITIAL_VEHICLES } from '../data/vehicles';
 
 interface VehicleModalProps {
   vehicle: Vehicle | null;
@@ -12,6 +14,7 @@ interface VehicleModalProps {
   onClose: () => void;
   onToggleWishlist: (id: string) => void;
   onBookNow: (vehicle: Vehicle) => void;
+  activeDates?: { pickup?: string; returnDate?: string; location?: string; };
   isAdmin?: boolean;
   onOpenAdminLogin?: () => void;
   onUpdateImage?: (vehicleId: string, newImageUrl: string) => void;
@@ -19,7 +22,7 @@ interface VehicleModalProps {
 }
 
 type TabType = 'OVERVIEW' | 'SPECS' | 'FEATURES' | 'REQUIREMENTS' | 'REVIEWS';
-type ViewerMode = 'PHOTO' | 'VIDEO' | 'TURNTABLE_VIDEO' | 'WEBGL_3D';
+type ViewerMode = 'PHOTO' | 'VIDEO' | 'TURNTABLE_VIDEO';
 
 export const VehicleModal: React.FC<VehicleModalProps> = ({
   vehicle,
@@ -28,6 +31,7 @@ export const VehicleModal: React.FC<VehicleModalProps> = ({
   onClose,
   onToggleWishlist,
   onBookNow,
+  activeDates,
   isAdmin = false,
   onOpenAdminLogin,
   onUpdateImage,
@@ -44,13 +48,51 @@ export const VehicleModal: React.FC<VehicleModalProps> = ({
   const [customPhotoInput, setCustomPhotoInput] = useState<string>('');
   const [photoError, setPhotoError] = useState<boolean>(false);
 
+  // Fallback high-res static photo
+  const fallbackPhoto = vehicle
+    ? (INITIAL_VEHICLES.find(iv => iv.id === vehicle.id)?.imageUrl ||
+       (vehicle.imageUrl && !vehicle.imageUrl.startsWith('blob:') ? vehicle.imageUrl : '') ||
+       'https://images.unsplash.com/photo-1614162692292-7ac56d7f7f1e?auto=format&fit=crop&w=1200&q=80')
+    : '';
+
+  const imgKey = vehicle ? `velox_car_img_${vehicle.id}` : '';
+
+  const [activePhotoUrl, setActivePhotoUrl] = useState<string>(() => {
+    if (!vehicle) return '';
+    if (typeof window !== 'undefined' && imgKey) {
+      const stored = localStorage.getItem(imgKey);
+      if (stored && !stored.startsWith('blob:')) return stored;
+    }
+    if (vehicle.imageUrl && !vehicle.imageUrl.startsWith('blob:')) {
+      return vehicle.imageUrl;
+    }
+    return fallbackPhoto;
+  });
+
+  // Load persisted photo from IndexedDB on modal open
+  useEffect(() => {
+    if (!vehicle || !imgKey) return;
+    let isMounted = true;
+    retrieveMediaItem(imgKey).then(url => {
+      if (isMounted && url) {
+        setActivePhotoUrl(url);
+        setPhotoError(false);
+      }
+    });
+    return () => { isMounted = false; };
+  }, [vehicle?.id, imgKey]);
+
+  // Keep in sync with vehicle prop
+  useEffect(() => {
+    if (vehicle?.imageUrl && !vehicle.imageUrl.startsWith('blob:')) {
+      setActivePhotoUrl(vehicle.imageUrl);
+      setPhotoError(false);
+    }
+  }, [vehicle?.imageUrl]);
+
   if (!vehicle) return null;
 
-  const imgKey = `velox_car_img_${vehicle.id}`;
-  const currentPhotoUrl =
-    typeof window !== 'undefined' && localStorage.getItem(imgKey)
-      ? localStorage.getItem(imgKey)!
-      : vehicle.imageUrl;
+  const currentPhotoUrl = (!photoError && activePhotoUrl) ? activePhotoUrl : fallbackPhoto;
 
   const formatPrice = (priceInr: number) => {
     if (currency === 'USD') {
@@ -60,32 +102,38 @@ export const VehicleModal: React.FC<VehicleModalProps> = ({
     return `₹${priceInr.toLocaleString('en-IN')}`;
   };
 
-  const handlePhotoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!isAdmin) return;
     const file = e.target.files?.[0];
     if (file) {
-      const blobUrl = URL.createObjectURL(file);
-      try {
-        localStorage.setItem(imgKey, blobUrl);
-      } catch {}
-      if (onUpdateImage) onUpdateImage(vehicle.id, blobUrl);
+      const sessionUrl = URL.createObjectURL(file);
+      setActivePhotoUrl(sessionUrl);
       setPhotoError(false);
       setShowPhotoUpload(false);
+      if (onUpdateImage) onUpdateImage(vehicle.id, sessionUrl);
+      try {
+        await persistMediaItem(imgKey, file);
+      } catch (err) {
+        console.warn('Error saving photo:', err);
+      }
     }
   };
 
-  const handlePhotoUrlSubmit = (e: React.FormEvent) => {
+  const handlePhotoUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return;
     if (customPhotoInput.trim()) {
       const url = customPhotoInput.trim();
-      try {
-        localStorage.setItem(imgKey, url);
-      } catch {}
-      if (onUpdateImage) onUpdateImage(vehicle.id, url);
+      setActivePhotoUrl(url);
       setPhotoError(false);
       setShowPhotoUpload(false);
       setCustomPhotoInput('');
+      if (onUpdateImage) onUpdateImage(vehicle.id, url);
+      try {
+        await persistMediaItem(imgKey, url);
+      } catch (err) {
+        console.warn('Error saving photo url:', err);
+      }
     }
   };
 
@@ -116,7 +164,7 @@ export const VehicleModal: React.FC<VehicleModalProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             {/* LEFT: 3D Vehicle Interactive Viewer (7 cols) */}
             <div className="lg:col-span-7 flex flex-col gap-4">
-              {/* Multi-Mode Showcase Selector: Photo, Real Car Video, 3D Space, WebGL 3D */}
+              {/* Multi-Mode Showcase Selector: Photo, Real Car Video, 3D View Space */}
               <div className="flex items-center justify-between bg-[#111216] p-1.5 rounded-xl border border-white/10 overflow-x-auto">
                 <div className="flex items-center gap-1">
                   <button
@@ -160,19 +208,6 @@ export const VehicleModal: React.FC<VehicleModalProps> = ({
                     <Video className="w-3.5 h-3.5" />
                     <span>3D View Space</span>
                   </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setViewerMode('WEBGL_3D')}
-                    className={`py-1.5 px-3 rounded-lg text-xs font-semibold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                      viewerMode === 'WEBGL_3D'
-                        ? 'bg-[#C9A45C] text-[#050505] shadow-md shadow-[#C9A45C]/20 font-bold'
-                        : 'text-[#999999] hover:text-white'
-                    }`}
-                  >
-                    <Box className="w-3.5 h-3.5" />
-                    <span>WebGL 3D</span>
-                  </button>
                 </div>
 
                 <span className="text-[10px] font-mono-num text-[#5ED39A] hidden sm:inline px-2 whitespace-nowrap">
@@ -180,9 +215,7 @@ export const VehicleModal: React.FC<VehicleModalProps> = ({
                     ? 'High-Res Photo'
                     : viewerMode === 'VIDEO'
                     ? 'Pure Video Player'
-                    : viewerMode === 'TURNTABLE_VIDEO'
-                    ? '3D Studio Space'
-                    : 'PBR Real-Time'}
+                    : '3D Studio Space'}
                 </span>
               </div>
 
@@ -191,11 +224,16 @@ export const VehicleModal: React.FC<VehicleModalProps> = ({
                 <div className="relative w-full h-[380px] md:h-[480px] rounded-2xl overflow-hidden bg-black border border-white/10 flex items-center justify-center group select-none">
                   {/* Vehicle Image */}
                   <img
-                    src={photoError ? vehicle.imageUrl : (currentPhotoUrl || vehicle.imageUrl)}
+                    src={currentPhotoUrl}
                     alt={vehicle.name}
                     referrerPolicy="no-referrer"
+                    loading="eager"
+                    decoding="async"
                     onError={() => {
-                      if (!photoError) setPhotoError(true);
+                      if (!photoError && currentPhotoUrl !== fallbackPhoto) {
+                        setPhotoError(true);
+                        setActivePhotoUrl(fallbackPhoto);
+                      }
                     }}
                     className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                   />
@@ -314,16 +352,10 @@ export const VehicleModal: React.FC<VehicleModalProps> = ({
                     if (onUpdateVideo) onUpdateVideo(vehicle.id, newVid);
                   }}
                 />
-              ) : viewerMode === 'TURNTABLE_VIDEO' ? (
+              ) : (
                 <StudioTurntable3DSpace
                   vehicle={vehicle}
                   onBookNow={onBookNow}
-                />
-              ) : (
-                <VehicleViewer3D
-                  vehicle={vehicle}
-                  selectedColor={selectedColorHex}
-                  onColorChange={setSelectedColorHex}
                 />
               )}
 
@@ -426,25 +458,47 @@ export const VehicleModal: React.FC<VehicleModalProps> = ({
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-3 pt-4 border-t border-white/10">
-                <button
-                  onClick={() => onBookNow(vehicle)}
-                  className="flex-1 py-3.5 px-6 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-semibold text-sm tracking-wider uppercase rounded-xl transition-all shadow-lg shadow-[#C9A45C]/20 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <span>Book This Car</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
+              <div className="pt-4 border-t border-white/10 space-y-2.5">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => onBookNow(vehicle)}
+                    className="flex-1 py-3.5 px-6 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-semibold text-sm tracking-wider uppercase rounded-xl transition-all shadow-lg shadow-[#C9A45C]/20 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>Book This Car</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
 
+                  <button
+                    onClick={() => onToggleWishlist(vehicle.id)}
+                    className={`p-3.5 rounded-xl border transition-colors cursor-pointer flex items-center justify-center ${
+                      isWishlisted
+                        ? 'bg-[#C9A45C]/15 border-[#C9A45C] text-[#C9A45C]'
+                        : 'bg-white/5 border-white/10 text-[#999999] hover:text-white'
+                    }`}
+                    aria-label="Wishlist toggle"
+                  >
+                    <Heart className={`w-5 h-5 ${isWishlisted ? 'fill-[#C9A45C]' : ''}`} />
+                  </button>
+                </div>
+
+                {/* Direct WhatsApp VIP Enquiry Button */}
                 <button
-                  onClick={() => onToggleWishlist(vehicle.id)}
-                  className={`p-3.5 rounded-xl border transition-colors cursor-pointer flex items-center justify-center ${
-                    isWishlisted
-                      ? 'bg-[#C9A45C]/15 border-[#C9A45C] text-[#C9A45C]'
-                      : 'bg-white/5 border-white/10 text-[#999999] hover:text-white'
-                  }`}
-                  aria-label="Wishlist toggle"
+                  type="button"
+                  onClick={() => openWhatsAppEnquiry({
+                    vehicleName: vehicle.name,
+                    category: vehicle.category,
+                    dailyPrice: vehicle.dailyPrice,
+                    pickupDate: activeDates?.pickup || getUpcomingDateString(1),
+                    returnDate: activeDates?.returnDate || getUpcomingDateString(3),
+                    pickupLocation: activeDates?.location || 'Bangalore VIP Hub',
+                    currency,
+                    enquiryType: 'FULL_ENQUIRY'
+                  })}
+                  className="w-full py-3 px-4 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 hover:border-emerald-500 text-emerald-200 hover:text-white font-mono-num font-semibold text-xs tracking-wider uppercase rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-emerald-950/30"
+                  title="Direct enquiry to VIP Concierge on WhatsApp"
                 >
-                  <Heart className={`w-5 h-5 ${isWishlisted ? 'fill-[#C9A45C]' : ''}`} />
+                  <MessageSquare className="w-4 h-4 text-emerald-400" />
+                  <span>Full Enquiry on WhatsApp</span>
                 </button>
               </div>
             </div>
@@ -498,10 +552,10 @@ export const VehicleModal: React.FC<VehicleModalProps> = ({
 
                   <div className="p-4 bg-[#111215] rounded-xl border border-white/5">
                     <h4 className="text-xs uppercase font-semibold text-[#C9A45C] mb-2 tracking-wider">
-                      Flexible Payment Policy
+                      Booking Confirmation & Deposit Policy
                     </h4>
                     <p className="text-xs text-[#999999] leading-relaxed">
-                      Choose between 100% upfront settlement or reserve your dates with a refundable 20% advance booking deposit. Full cancellation refund available up to 24 hours prior to handover.
+                      Booking is confirmed only after the first deposit payment (20% advance booking deposit or 100% full settlement) is authorized. Dates and car availability remain tentative until the initial deposit is received. Full cancellation refund available up to 24 hours prior to handover.
                     </p>
                   </div>
                 </div>

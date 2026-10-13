@@ -1,7 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Vehicle } from '../types';
 import { Camera, Play, Pause, Volume2, VolumeX, Upload, Check, Film, RefreshCw, Lock, Unlock } from 'lucide-react';
 import { useAdminAuth } from '../context/AdminAuthContext';
+import { persistMediaItem, retrieveMediaItem } from '../utils/persistentStorage';
+
+import { INITIAL_VEHICLES } from '../data/vehicles';
 
 interface VehicleVisualCardProps {
   vehicle: Vehicle;
@@ -23,6 +26,12 @@ export const VehicleVisualCard: React.FC<VehicleVisualCardProps> = ({
   const color = activeColor || vehicle.colors[0]?.hex || '#0E0F12';
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // Fallback static showroom photo from verified vehicle definitions
+  const fallbackShowroomImage =
+    INITIAL_VEHICLES.find(iv => iv.id === vehicle.id)?.imageUrl ||
+    (vehicle.imageUrl && !vehicle.imageUrl.startsWith('blob:') ? vehicle.imageUrl : '') ||
+    'https://images.unsplash.com/photo-1614162692292-7ac56d7f7f1e?auto=format&fit=crop&w=1200&q=80';
+
   // Mode: PHOTO (default) or VIDEO
   const [viewMode, setViewMode] = useState<'PHOTO' | 'VIDEO'>('PHOTO');
 
@@ -42,39 +51,85 @@ export const VehicleVisualCard: React.FC<VehicleVisualCardProps> = ({
   const imgStorageKey = `velox_car_img_${vehicle.id}`;
   const videoStorageKey = `velox_car_video_${vehicle.id}`;
 
-  const currentImageUrl =
-    typeof window !== 'undefined' && localStorage.getItem(imgStorageKey)
-      ? localStorage.getItem(imgStorageKey)!
-      : vehicle.imageUrl;
+  const [activeImgUrl, setActiveImgUrl] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(imgStorageKey);
+      if (stored && !stored.startsWith('blob:')) {
+        return stored;
+      }
+    }
+    if (vehicle.imageUrl && !vehicle.imageUrl.startsWith('blob:')) {
+      return vehicle.imageUrl;
+    }
+    return fallbackShowroomImage;
+  });
 
-  const currentVideoUrl =
-    typeof window !== 'undefined' && localStorage.getItem(videoStorageKey)
-      ? localStorage.getItem(videoStorageKey)!
-      : vehicle.videoUrl || DEFAULT_VIDEO_URL;
+  const [activeVidUrl, setActiveVidUrl] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(videoStorageKey);
+      if (stored && !stored.startsWith('blob:')) {
+        return stored;
+      }
+    }
+    return vehicle.videoUrl && !vehicle.videoUrl.startsWith('blob:') ? vehicle.videoUrl : DEFAULT_VIDEO_URL;
+  });
+
+  // Keep active media in sync when vehicle prop updates
+  useEffect(() => {
+    if (vehicle.imageUrl && !vehicle.imageUrl.startsWith('blob:')) {
+      setActiveImgUrl(vehicle.imageUrl);
+      setImgError(false);
+    }
+  }, [vehicle.imageUrl, vehicle.id]);
+
+  // Retrieve media on mount if stored as Blobs in IndexedDB
+  useEffect(() => {
+    let isMounted = true;
+    retrieveMediaItem(imgStorageKey).then(url => {
+      if (isMounted && url) {
+        setActiveImgUrl(url);
+        setImgError(false);
+        if (onUpdateImage) onUpdateImage(vehicle.id, url);
+      }
+    });
+    retrieveMediaItem(videoStorageKey).then(url => {
+      if (isMounted && url) {
+        setActiveVidUrl(url);
+        if (onUpdateVideo) onUpdateVideo(vehicle.id, url);
+      }
+    });
+    return () => { isMounted = false; };
+  }, [vehicle.id, imgStorageKey, videoStorageKey]);
+
+  const currentImageUrl = (!imgError && activeImgUrl) ? activeImgUrl : fallbackShowroomImage;
+  const currentVideoUrl = activeVidUrl || vehicle.videoUrl || DEFAULT_VIDEO_URL;
 
   // Image Upload Handlers
-  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const blobUrl = URL.createObjectURL(file);
-      if (onUpdateImage) onUpdateImage(vehicle.id, blobUrl);
       try {
-        localStorage.setItem(imgStorageKey, blobUrl);
-      } catch {}
+        const persistedUrl = await persistMediaItem(imgStorageKey, file);
+        setActiveImgUrl(persistedUrl);
+        if (onUpdateImage) onUpdateImage(vehicle.id, persistedUrl);
+      } catch {
+        const fallback = URL.createObjectURL(file);
+        setActiveImgUrl(fallback);
+        if (onUpdateImage) onUpdateImage(vehicle.id, fallback);
+      }
       setImgError(false);
       setViewMode('PHOTO');
       setShowImageUpload(false);
     }
   };
 
-  const handleImageUrlSubmit = (e: React.FormEvent) => {
+  const handleImageUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (customImageUrlInput.trim()) {
       const url = customImageUrlInput.trim();
+      await persistMediaItem(imgStorageKey, url);
+      setActiveImgUrl(url);
       if (onUpdateImage) onUpdateImage(vehicle.id, url);
-      try {
-        localStorage.setItem(imgStorageKey, url);
-      } catch {}
       setImgError(false);
       setViewMode('PHOTO');
       setShowImageUpload(false);
@@ -83,28 +138,31 @@ export const VehicleVisualCard: React.FC<VehicleVisualCardProps> = ({
   };
 
   // Video Upload Handlers
-  const handleVideoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVideoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const blobUrl = URL.createObjectURL(file);
-      if (onUpdateVideo) onUpdateVideo(vehicle.id, blobUrl);
       try {
-        localStorage.setItem(videoStorageKey, blobUrl);
-      } catch {}
+        const persistedUrl = await persistMediaItem(videoStorageKey, file);
+        setActiveVidUrl(persistedUrl);
+        if (onUpdateVideo) onUpdateVideo(vehicle.id, persistedUrl);
+      } catch {
+        const fallback = URL.createObjectURL(file);
+        setActiveVidUrl(fallback);
+        if (onUpdateVideo) onUpdateVideo(vehicle.id, fallback);
+      }
       setViewMode('VIDEO');
       setShowVideoUpload(false);
       setIsPlaying(true);
     }
   };
 
-  const handleVideoUrlSubmit = (e: React.FormEvent) => {
+  const handleVideoUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (customVideoUrlInput.trim()) {
       const url = customVideoUrlInput.trim();
+      await persistMediaItem(videoStorageKey, url);
+      setActiveVidUrl(url);
       if (onUpdateVideo) onUpdateVideo(vehicle.id, url);
-      try {
-        localStorage.setItem(videoStorageKey, url);
-      } catch {}
       setViewMode('VIDEO');
       setShowVideoUpload(false);
       setCustomVideoUrlInput('');
@@ -364,12 +422,15 @@ export const VehicleVisualCard: React.FC<VehicleVisualCardProps> = ({
       {viewMode === 'PHOTO' ? (
         <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
           <img
-            src={imgError ? (vehicle.imageUrl || DEFAULT_VIDEO_URL) : (currentImageUrl || vehicle.imageUrl)}
+            src={currentImageUrl}
             alt={vehicle.name}
             referrerPolicy="no-referrer"
+            loading="eager"
+            decoding="async"
             onError={() => {
-              if (!imgError && vehicle.imageUrl && currentImageUrl !== vehicle.imageUrl) {
+              if (!imgError && currentImageUrl !== fallbackShowroomImage) {
                 setImgError(true);
+                setActiveImgUrl(fallbackShowroomImage);
               }
             }}
             className={`w-full h-full object-cover transition-transform duration-700 ease-out filter drop-shadow-2xl ${

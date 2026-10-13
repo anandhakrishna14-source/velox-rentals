@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Lock, Eye, EyeOff, KeyRound, AlertCircle, X, Check } from 'lucide-react';
+import { ShieldCheck, Lock, KeyRound, AlertCircle, X, Check } from 'lucide-react';
 import { useAdminAuth } from '../context/AdminAuthContext';
 
 export const AdminLoginModal: React.FC = () => {
   const { showLoginModal, closeLoginModal, login, pendingActionName } = useAdminAuth();
   const [passcode, setPasscode] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -27,13 +26,8 @@ export const AdminLoginModal: React.FC = () => {
         setPasscode('');
       }, 500);
     } else {
-      setError('Invalid admin credentials. Hint: use default key "admin123".');
+      setError('Invalid admin credentials. Please enter a valid security passcode.');
     }
-  };
-
-  const handleUseDemoKey = () => {
-    setPasscode('admin123');
-    setError(null);
   };
 
   return (
@@ -99,11 +93,11 @@ export const AdminLoginModal: React.FC = () => {
               Admin Password / Security PIN
             </label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-white/40">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-white/40">
                 <KeyRound className="w-4 h-4" />
               </div>
               <input
-                type={showPassword ? 'text' : 'password'}
+                type="password"
                 value={passcode}
                 onChange={(e) => {
                   setPasscode(e.target.value);
@@ -111,16 +105,9 @@ export const AdminLoginModal: React.FC = () => {
                 }}
                 placeholder="Enter admin passcode"
                 autoFocus
-                className="w-full pl-9 pr-10 py-2.5 bg-black/60 border border-white/15 focus:border-[#C9A45C] rounded-xl text-sm text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-[#C9A45C] transition-all"
+                autoComplete="current-password"
+                className="w-full pl-10 pr-4 py-2.5 bg-black/60 border border-white/15 focus:border-[#C9A45C] rounded-xl text-sm text-white placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-[#C9A45C] transition-all tracking-wider font-mono"
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-white/40 hover:text-white transition-colors cursor-pointer"
-                title={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
             </div>
           </div>
 
@@ -138,20 +125,8 @@ export const AdminLoginModal: React.FC = () => {
             </div>
           )}
 
-          {/* Quick Demo Key Pill */}
-          <div className="flex items-center justify-between text-xs pt-1">
-            <span className="text-[#888888]">Evaluation demo credentials:</span>
-            <button
-              type="button"
-              onClick={handleUseDemoKey}
-              className="text-[#C9A45C] hover:text-[#DFBD78] font-mono-num underline cursor-pointer transition-colors"
-            >
-              Fill "admin123"
-            </button>
-          </div>
-
           {/* Actions */}
-          <div className="flex items-center gap-3 pt-2">
+          <div className="flex items-center gap-3 pt-3">
             <button
               type="button"
               onClick={closeLoginModal}
@@ -164,7 +139,7 @@ export const AdminLoginModal: React.FC = () => {
               className="flex-1 py-2.5 px-4 rounded-xl bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] text-xs font-bold uppercase tracking-wider transition-all shadow-lg shadow-[#C9A45C]/25 flex items-center justify-center gap-2 cursor-pointer"
             >
               <ShieldCheck className="w-4 h-4" />
-              <span>Authenticate</span>
+              <span>Sign In as Admin</span>
             </button>
           </div>
         </form>

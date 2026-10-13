@@ -34,6 +34,7 @@ interface MyBookingsModalProps {
   onRescheduleBooking: (bookingId: string, newPickupDate: string, newReturnDate: string) => void;
   onOpenDigitalPass: (booking: Booking) => void;
   onOpenInspection: (booking: Booking) => void;
+  onPayDeposit?: (bookingId: string, depositAmount: number) => void;
 }
 
 export type TabType = 'UPCOMING' | 'ACTIVE' | 'EMERGENCY' | 'COMPLETED' | 'CANCELLED' | 'PROFILE';
@@ -46,11 +47,15 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
   onCancelBooking,
   onRescheduleBooking,
   onOpenDigitalPass,
-  onOpenInspection
+  onOpenInspection,
+  onPayDeposit
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [selectedBookingForReschedule, setSelectedBookingForReschedule] = useState<Booking | null>(null);
   const [selectedEmergencyBooking, setSelectedEmergencyBooking] = useState<Booking | null>(null);
+  const [payingBooking, setPayingBooking] = useState<Booking | null>(null);
+  const [depositPaymentMethod, setDepositPaymentMethod] = useState<'CARD' | 'UPI' | 'NETBANKING'>('CARD');
+  const [isAuthorizingDeposit, setIsAuthorizingDeposit] = useState<boolean>(false);
   const [newPickupDate, setNewPickupDate] = useState<string>('');
   const [newReturnDate, setNewReturnDate] = useState<string>('');
 
@@ -62,8 +67,19 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
     return `₹${priceInr.toLocaleString('en-IN')}`;
   };
 
+  const handleConfirmPayDeposit = () => {
+    if (!payingBooking) return;
+    setIsAuthorizingDeposit(true);
+    setTimeout(() => {
+      setIsAuthorizingDeposit(false);
+      const depositAmt = payingBooking.depositAmount || Math.round(payingBooking.total * 0.2);
+      onPayDeposit?.(payingBooking.id, depositAmt);
+      setPayingBooking(null);
+    }, 1300);
+  };
+
   const filteredBookings = bookings.filter(b => {
-    if (activeTab === 'UPCOMING') return b.status === 'CONFIRMED' || b.status === 'PENDING';
+    if (activeTab === 'UPCOMING') return b.status === 'CONFIRMED' || b.status === 'PENDING' || b.status === 'PAYMENT_PENDING';
     if (activeTab === 'ACTIVE') return b.status === 'ACTIVE';
     if (activeTab === 'COMPLETED') return b.status === 'COMPLETED';
     if (activeTab === 'CANCELLED') return b.status === 'CANCELLED' || b.status === 'REFUNDED';
@@ -103,7 +119,7 @@ TOTAL VALUE:       ₹${b.total.toLocaleString('en-IN')}
 AMOUNT PAID:       ₹${b.paidAmount.toLocaleString('en-IN')}
 BALANCE DUE:       ₹${b.balanceAmount.toLocaleString('en-IN')}
 ==============================================================
-Velox Drive 24/7 VIP Concierge Hotline: +91 800 835 6900
+Velox Drive 24/7 VIP Concierge Support & Curbside Operations
 `;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -205,9 +221,11 @@ Velox Drive 24/7 VIP Concierge Hotline: +91 800 835 6900
                           #{b.id}
                         </span>
                         <span
-                          className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded ${
+                          className={`text-[10px] font-semibold uppercase px-2.5 py-0.5 rounded ${
                             b.status === 'CONFIRMED'
-                              ? 'bg-[#5ED39A]/15 text-[#5ED39A]'
+                              ? 'bg-[#5ED39A]/15 text-[#5ED39A] border border-[#5ED39A]/30'
+                              : b.status === 'PAYMENT_PENDING'
+                              ? 'bg-amber-500/15 text-amber-400 border border-amber-500/40 font-bold'
                               : b.status === 'ACTIVE'
                               ? 'bg-[#3B82F6]/15 text-[#3B82F6]'
                               : b.status === 'CANCELLED'
@@ -215,7 +233,7 @@ Velox Drive 24/7 VIP Concierge Hotline: +91 800 835 6900
                               : 'bg-white/10 text-[#AAAAAA]'
                           }`}
                         >
-                          {b.status}
+                          {b.status === 'PAYMENT_PENDING' ? 'AWAITING FIRST DEPOSIT · UNCONFIRMED' : b.status}
                         </span>
                       </div>
 
@@ -232,32 +250,73 @@ Velox Drive 24/7 VIP Concierge Hotline: +91 800 835 6900
 
                       <div className="flex items-center gap-4 text-xs font-mono-num text-[#CCCCCC] pt-1">
                         <span>Total: {formatPrice(b.total)}</span>
-                        <span>Paid: <strong className="text-[#5ED39A]">{formatPrice(b.paidAmount)}</strong></span>
+                        <span>Paid: <strong className={b.paidAmount > 0 ? "text-[#5ED39A]" : "text-[#888888]"}>{formatPrice(b.paidAmount)}</strong></span>
                         {b.balanceAmount > 0 && (
                           <span className="text-[#C9A45C]">Due at Handover: {formatPrice(b.balanceAmount)}</span>
                         )}
                       </div>
+
+                      {/* Policy Banner for Payment Pending */}
+                      {b.status === 'PAYMENT_PENDING' && (
+                        <div className="p-3 bg-amber-950/20 border border-amber-500/30 rounded-xl space-y-1 mt-2">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                            <span>Booking Policy: Confirmed Only After First Deposit Payment</span>
+                          </div>
+                          <p className="text-[11px] text-[#DDDDDD] leading-relaxed">
+                            This vehicle is currently on temporary grace hold. Complete your first deposit of <strong className="text-amber-300 font-mono-num font-bold">{formatPrice(b.depositAmount || Math.round(b.total * 0.2))}</strong> to officially confirm and lock your reservation.
+                          </p>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Right: Actions (Digital Pass & Inspection) */}
+                    {/* Right: Actions (Digital Pass & Inspection & Deposit Payment) */}
                     <div className="flex flex-wrap md:flex-col items-stretch gap-2 shrink-0">
+                      {/* If PAYMENT_PENDING: Prominent Pay Deposit CTA */}
+                      {b.status === 'PAYMENT_PENDING' && (
+                        <>
+                          <button
+                            onClick={() => setPayingBooking(b)}
+                            className="py-2.5 px-3.5 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-lg shadow-[#C9A45C]/25"
+                          >
+                            <ShieldCheck className="w-4 h-4 text-black" />
+                            <span>Pay Deposit to Confirm ({formatPrice(b.depositAmount || Math.round(b.total * 0.2))})</span>
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              if (confirm(`Release temporary hold for reservation #${b.id}?`)) {
+                                onCancelBooking(b.id);
+                              }
+                            }}
+                            className="py-1.5 px-3 bg-[#E66A6A]/10 hover:bg-[#E66A6A]/20 border border-[#E66A6A]/30 text-[#E66A6A] rounded-xl text-xs transition-colors cursor-pointer text-center"
+                          >
+                            Release Hold
+                          </button>
+                        </>
+                      )}
+
                       {/* View Digital Rental Pass (Item 8) */}
-                      <button
-                        onClick={() => onOpenDigitalPass(b)}
-                        className="py-2 px-3 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <QrCode className="w-3.5 h-3.5" />
-                        <span>Rental Pass</span>
-                      </button>
+                      {b.status !== 'PAYMENT_PENDING' && (
+                        <button
+                          onClick={() => onOpenDigitalPass(b)}
+                          className="py-2 px-3 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>Rental Pass</span>
+                        </button>
+                      )}
 
                       {/* Condition Inspection (Item 7) */}
-                      <button
-                        onClick={() => onOpenInspection(b)}
-                        className="py-2 px-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <FileCheck2 className="w-3.5 h-3.5 text-[#5ED39A]" />
-                        <span>Condition Log</span>
-                      </button>
+                      {b.status !== 'PAYMENT_PENDING' && (
+                        <button
+                          onClick={() => onOpenInspection(b)}
+                          className="py-2 px-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <FileCheck2 className="w-3.5 h-3.5 text-[#5ED39A]" />
+                          <span>Condition Log</span>
+                        </button>
+                      )}
 
                       {/* Emergency Roadside SOS Button */}
                       {(b.status === 'ACTIVE' || b.status === 'CONFIRMED') && (
@@ -393,6 +452,100 @@ Velox Drive 24/7 VIP Concierge Hotline: +91 800 835 6900
                   Confirm Changes
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* First Deposit Payment Dialog */}
+        {payingBooking && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+            <div className="relative w-full max-w-md bg-[#111216] border border-[#2B2C33] rounded-3xl p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-[#C9A45C]" />
+                  <h4 className="text-base font-luxury text-white">AUTHORIZE FIRST DEPOSIT</h4>
+                </div>
+                <button
+                  onClick={() => setPayingBooking(null)}
+                  className="p-1 rounded-lg text-[#888888] hover:text-white cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between text-[#888888]">
+                  <span>Vehicle:</span>
+                  <span className="text-white font-semibold">{payingBooking.vehicleName}</span>
+                </div>
+                <div className="flex justify-between text-[#888888]">
+                  <span>Reservation Ref:</span>
+                  <span className="text-[#C9A45C] font-mono-num font-bold">#{payingBooking.id}</span>
+                </div>
+                <div className="flex justify-between text-[#888888]">
+                  <span>Rental Schedule:</span>
+                  <span className="text-white font-mono-num">{payingBooking.pickupDate} → {payingBooking.returnDate}</span>
+                </div>
+                <div className="flex justify-between items-baseline pt-2 border-t border-white/10">
+                  <span className="font-bold text-white uppercase text-[11px]">First Deposit Payable Today:</span>
+                  <span className="text-xl font-bold font-mono-num text-[#5ED39A]">
+                    {formatPrice(payingBooking.depositAmount || Math.round(payingBooking.total * 0.2))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-950/20 border border-amber-500/30 rounded-xl text-[11px] text-[#DDDDDD] flex items-center gap-2 leading-relaxed">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Booking Policy: Authorizing this initial deposit will immediately switch status to <strong>CONFIRMED</strong> and guarantee your vehicle schedule.</span>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-[11px] text-[#888888]">Payment Method</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDepositPaymentMethod('CARD')}
+                    className={`p-2.5 rounded-xl border text-center text-xs cursor-pointer ${
+                      depositPaymentMethod === 'CARD' ? 'border-[#C9A45C] text-[#C9A45C] bg-[#181920]' : 'border-[#222226] text-[#888888]'
+                    }`}
+                  >
+                    VIP Card
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDepositPaymentMethod('UPI')}
+                    className={`p-2.5 rounded-xl border text-center text-xs cursor-pointer ${
+                      depositPaymentMethod === 'UPI' ? 'border-[#C9A45C] text-[#C9A45C] bg-[#181920]' : 'border-[#222226] text-[#888888]'
+                    }`}
+                  >
+                    UPI / QR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDepositPaymentMethod('NETBANKING')}
+                    className={`p-2.5 rounded-xl border text-center text-xs cursor-pointer ${
+                      depositPaymentMethod === 'NETBANKING' ? 'border-[#C9A45C] text-[#C9A45C] bg-[#181920]' : 'border-[#222226] text-[#888888]'
+                    }`}
+                  >
+                    NetBanking
+                  </button>
+                </div>
+              </div>
+
+              <button
+                onClick={handleConfirmPayDeposit}
+                disabled={isAuthorizingDeposit}
+                className="w-full py-3.5 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isAuthorizingDeposit ? (
+                  <span>Authorizing First Deposit Gateway...</span>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>PAY {formatPrice(payingBooking.depositAmount || Math.round(payingBooking.total * 0.2))} & CONFIRM BOOKING</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         )}

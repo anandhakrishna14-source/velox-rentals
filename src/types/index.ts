@@ -91,6 +91,10 @@ export interface Booking {
   licenseNumber?: string;
   licenseVerified: boolean;
   createdAt: string;
+  depositPaid?: boolean;
+  depositAmount?: number;
+  depositTransactionId?: string;
+  depositPaidAt?: string;
 }
 
 export interface LocationOption {

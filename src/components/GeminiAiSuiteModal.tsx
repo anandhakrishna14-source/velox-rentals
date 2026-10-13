@@ -186,7 +186,7 @@ export const GeminiAiSuiteModal: React.FC<GeminiAiSuiteModalProps> = ({
         {
           id: `model-${Date.now()}`,
           sender: 'model',
-          text: 'Unable to reach the concierge network. Please check your network connection or contact +91 800 835 6900.',
+          text: 'Unable to reach the concierge network. Please check your network connection or tap Connect on WhatsApp VIP.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, ShieldCheck, Mail, Lock, User as UserIcon, LogOut, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, ShieldCheck, Mail, Lock, User as UserIcon, LogOut, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface AuthModalProps {
@@ -8,7 +8,7 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { user, userProfile, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut } = useAuth();
+  const { user, userProfile, signInWithGoogle, signInWithEmail, signUpWithEmail, signInAsDemoClient, signOut } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,7 +25,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       await signInWithGoogle();
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Google Sign-in failed. Please try again.');
+      console.warn('Google sign-in caught:', err);
+      if (err?.code === 'auth/popup-blocked' || err?.message?.includes('popup')) {
+        setError('Browser popup was blocked. You can also use Instant VIP Access or Email below.');
+      } else {
+        setError(err?.message || 'Google Sign-in failed. Please try Instant VIP Access or Email.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleInstantDemoSignIn = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      await signInAsDemoClient();
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to authenticate VIP session.');
     } finally {
       setLoading(false);
     }
@@ -48,11 +66,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       if (isSignUp) {
         await signUpWithEmail(email, password, fullName);
       } else {
-        await signInWithEmail(email, password);
+        try {
+          await signInWithEmail(email, password);
+        } catch (signInErr: any) {
+          // If no account exists for this email, ask them or auto-create account
+          if (
+            signInErr?.code === 'auth/user-not-found' ||
+            signInErr?.code === 'auth/invalid-credential' ||
+            signInErr?.code === 'auth/invalid-login-credentials'
+          ) {
+            setIsSignUp(true);
+            setFullName(email.split('@')[0]);
+            setError('No account was found with these credentials. We switched you to Sign Up — please click "Create VIP Account" to finish.');
+            return;
+          }
+          throw signInErr;
+        }
       }
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Authentication failed. Please verify your credentials.');
+      setError(err?.message || 'Authentication failed. Please verify your credentials or use Instant VIP Access.');
     } finally {
       setLoading(false);
     }
@@ -146,12 +179,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               </div>
             </div>
 
+            {/* Instant Demo VIP Access */}
+            <button
+              type="button"
+              onClick={handleInstantDemoSignIn}
+              disabled={loading}
+              className="w-full py-2.5 px-3 rounded-xl bg-[#C9A45C]/15 hover:bg-[#C9A45C]/25 border border-[#C9A45C]/50 text-[#DFBD78] font-semibold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer mb-3 shadow-sm hover:scale-[1.01]"
+            >
+              <Sparkles className="w-4 h-4 text-[#C9A45C]" />
+              <span>Instant VIP Member Access (One-Click)</span>
+            </button>
+
             {/* Google One-Click Sign-in Button */}
             <button
               type="button"
               onClick={handleGoogleSignIn}
               disabled={loading}
-              className="w-full py-3 px-4 rounded-xl bg-white hover:bg-gray-100 text-[#1F1F1F] font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-3 cursor-pointer mb-4"
+              className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-gray-100 text-[#1F1F1F] font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-3 cursor-pointer mb-4"
             >
               {/* Google G Logo SVG */}
               <svg className="w-4 h-4" viewBox="0 0 24 24">

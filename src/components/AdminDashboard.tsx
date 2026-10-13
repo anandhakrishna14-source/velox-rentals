@@ -14,15 +14,19 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  AlertCircle,
   RotateCcw,
   Search,
   Eye,
   Settings,
   Radio,
-  LogOut
+  LogOut,
+  Save,
+  RefreshCw
 } from 'lucide-react';
 import { Vehicle, Booking, LocationOption, PricingSettings } from '../types';
 import { useAdminAuth } from '../context/AdminAuthContext';
+import { saveAllAdminChanges } from '../utils/persistentStorage';
 
 interface AdminDashboardProps {
   vehicles: Vehicle[];
@@ -36,6 +40,7 @@ interface AdminDashboardProps {
   onDeleteVehicle: (vehicleId: string) => void;
   onUpdateBookingStatus: (bookingId: string, status: any) => void;
   onUpdatePricingSettings: (settings: PricingSettings) => void;
+  onSaveAllChanges?: () => Promise<void> | void;
 }
 
 type AdminTab = 'OVERVIEW' | 'FLEET' | 'BOOKINGS' | 'CUSTOMERS' | 'PRICING' | 'LOCATIONS';
@@ -51,7 +56,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onAddVehicle,
   onDeleteVehicle,
   onUpdateBookingStatus,
-  onUpdatePricingSettings
+  onUpdatePricingSettings,
+  onSaveAllChanges
 }) => {
   const { logout } = useAdminAuth();
   const [activeTab, setActiveTab] = useState<AdminTab>('OVERVIEW');
@@ -66,6 +72,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newCarCategory, setNewCarCategory] = useState<any>('Sports');
   const [newCarPrice, setNewCarPrice] = useState<number>(8999);
   const [newCarHorsepower, setNewCarHorsepower] = useState<number>(380);
+  const [newCarAvailable, setNewCarAvailable] = useState<boolean>(true);
 
   // Pricing settings draft
   const [pricingDraft, setPricingDraft] = useState<PricingSettings>(pricingSettings);
@@ -73,6 +80,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const saved = localStorage.getItem('velox_active_incident');
     return saved ? JSON.parse(saved) : null;
   });
+
+  // Admin Save State for persisting all fleet, video, picture, and config changes
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [saveNotification, setSaveNotification] = useState<string | null>(null);
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('velox_admin_last_saved') : null;
+  });
+
+  const handleSaveAll = async () => {
+    setIsSaving(true);
+    setSaveNotification(null);
+    try {
+      const res = await saveAllAdminChanges({
+        vehicles,
+        pricingSettings: pricingDraft,
+        locations,
+        bookings
+      });
+      if (onSaveAllChanges) {
+        await onSaveAllChanges();
+      }
+      setIsSaving(false);
+      setSaveSuccess(true);
+      const timeStr = new Date().toLocaleTimeString();
+      setLastSavedTime(new Date().toISOString());
+      setSaveNotification(
+        `All changes saved permanently at ${timeStr}! Fleet vehicles, custom videos, photos, pricing, and configurations will reflect even after closing the whole application.`
+      );
+      setTimeout(() => setSaveSuccess(false), 3500);
+      setTimeout(() => setSaveNotification(null), 8000);
+    } catch (e: any) {
+      setIsSaving(false);
+      setSaveNotification(`Error saving changes: ${e.message || 'Check connection'}`);
+    }
+  };
 
   const formatPrice = (priceInr: number) => {
     if (currency === 'USD') {
@@ -91,6 +134,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleSaveVehicleEdit = () => {
     if (!editingVehicle) return;
     onUpdateVehicle(editingVehicle);
+    setSaveNotification(
+      `${editingVehicle.name} updated: Status is ${editingVehicle.available ? 'AVAILABLE (Live on Fleet)' : 'RESERVED'} and saved!`
+    );
+    setTimeout(() => setSaveNotification(null), 4500);
     setEditingVehicle(null);
   };
 
@@ -113,7 +160,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       dailyPrice: newCarPrice,
       weekendPrice: Math.round(newCarPrice * 1.15),
       securityDeposit: 15000,
-      available: true,
+      available: newCarAvailable,
       colors: [
         { name: 'Onyx Black', hex: '#15171C' },
         { name: 'Titanium', hex: '#585C63' },
@@ -127,8 +174,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       reviews: []
     };
     onAddVehicle(created);
+    setSaveNotification(`${created.name} added to fleet with status ${created.available ? 'AVAILABLE' : 'RESERVED'}!`);
+    setTimeout(() => setSaveNotification(null), 4500);
     setShowAddVehicleModal(false);
     setNewCarName('');
+    setNewCarAvailable(true);
   };
 
   return (
@@ -145,6 +195,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Top Save Changes Button */}
+            <button
+              type="button"
+              onClick={handleSaveAll}
+              disabled={isSaving}
+              className={`px-3.5 py-1.5 rounded-lg font-bold text-xs font-mono-num transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                saveSuccess
+                  ? 'bg-emerald-500 text-black shadow-emerald-500/30'
+                  : 'bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] shadow-[#C9A45C]/20'
+              }`}
+              title="Save all changes permanently to cloud database and local storage so they persist after closing the app"
+            >
+              {isSaving ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : saveSuccess ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Saved!</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Changes</span>
+                </>
+              )}
+            </button>
+
             <button
               type="button"
               onClick={() => {
@@ -167,6 +247,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Save Confirmation Notification Banner */}
+        {saveNotification && (
+          <div className="px-6 py-2.5 bg-emerald-950/90 border-b border-emerald-500/40 text-emerald-200 text-xs flex items-center justify-between gap-4 animate-fadeIn">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-medium">{saveNotification}</span>
+            </div>
+            <span className="text-[10px] text-emerald-400/80 font-mono-num uppercase tracking-wider shrink-0 hidden sm:inline">
+              Cloud & Local DB Synced ✓
+            </span>
+          </div>
+        )}
 
         {/* Navigation Bar */}
         <div className="flex items-center gap-2 px-6 pt-4 border-b border-white/5 bg-[#0C0D10] overflow-x-auto">
@@ -368,14 +461,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </td>
                         <td className="p-4">
                           <button
-                            onClick={() => onUpdateVehicle({ ...v, available: !v.available })}
-                            className={`px-2.5 py-1 rounded text-[10px] font-semibold cursor-pointer transition-colors ${
+                            type="button"
+                            onClick={() => {
+                              const newStatus = !v.available;
+                              onUpdateVehicle({ ...v, available: newStatus });
+                              setSaveNotification(
+                                `${v.name} status updated to ${newStatus ? 'AVAILABLE (Live on Fleet)' : 'RESERVED (Taken off Live Fleet)'} and saved!`
+                              );
+                              setTimeout(() => setSaveNotification(null), 4500);
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition-all flex items-center gap-1.5 shadow-sm border ${
                               v.available
-                                ? 'bg-[#5ED39A]/15 text-[#5ED39A]'
-                                : 'bg-[#E66A6A]/15 text-[#E66A6A]'
+                                ? 'bg-[#5ED39A]/15 text-[#5ED39A] border-[#5ED39A]/30 hover:bg-[#5ED39A]/25'
+                                : 'bg-[#E66A6A]/15 text-[#E66A6A] border-[#E66A6A]/30 hover:bg-[#E66A6A]/25'
                             }`}
+                            title={v.available ? 'Click to switch status to RESERVED' : 'Click to switch status to AVAILABLE'}
                           >
-                            {v.available ? 'AVAILABLE' : 'RESERVED'}
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                v.available ? 'bg-[#5ED39A]' : 'bg-[#E66A6A]'
+                              }`}
+                            />
+                            <span>{v.available ? 'AVAILABLE' : 'RESERVED'}</span>
                           </button>
                         </td>
                         <td className="p-4 text-right">
@@ -439,18 +546,84 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <div className="text-xs text-[#AAAAAA]">
                         Customer: <strong className="text-white">{b.customerName}</strong> ({b.customerPhone}) · Driver: {b.driverOption}
                       </div>
-                      <div className="text-xs font-mono-num text-[#888888] mt-1">
-                        Total: {formatPrice(b.total)} · Paid: {formatPrice(b.paidAmount)} · Balance: {formatPrice(b.balanceAmount)}
+                      <div className="text-xs font-mono-num text-[#888888] mt-1 flex flex-wrap items-center gap-3">
+                        <span>Total: {formatPrice(b.total)}</span>
+                        <span>Paid: <strong className={b.paidAmount > 0 ? "text-[#5ED39A]" : "text-[#888888]"}>{formatPrice(b.paidAmount)}</strong></span>
+                        {b.balanceAmount > 0 && <span>Balance: {formatPrice(b.balanceAmount)}</span>}
+                        {b.status === 'PAYMENT_PENDING' ? (
+                          <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-bold">
+                            Deposit Pending ({formatPrice(b.depositAmount || Math.round(b.total * 0.2))}) · Not Confirmed
+                          </span>
+                        ) : (b.depositPaid || b.status === 'CONFIRMED') ? (
+                          <span className="text-[10px] bg-[#5ED39A]/15 text-[#5ED39A] px-2 py-0.5 rounded font-medium">
+                            First Deposit Paid ✓
+                          </span>
+                        ) : null}
                       </div>
+
+                      {(() => {
+                        const targetCar = vehicles.find(v => v.id === b.vehicleId || v.name === b.vehicleName);
+                        if (!targetCar) return null;
+                        return (
+                          <div className="flex items-center gap-2 mt-2 pt-1.5 border-t border-white/5 text-[11px]">
+                            <span className="text-[#888888]">Vehicle Fleet Status:</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextAvail = !targetCar.available;
+                                onUpdateVehicle({ ...targetCar, available: nextAvail });
+                                setSaveNotification(
+                                  `${targetCar.name} status updated to ${nextAvail ? 'AVAILABLE (Live on Fleet)' : 'RESERVED'}!`
+                                );
+                                setTimeout(() => setSaveNotification(null), 4000);
+                              }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition-colors border flex items-center gap-1 ${
+                                targetCar.available
+                                  ? 'bg-[#5ED39A]/15 text-[#5ED39A] border-[#5ED39A]/30 hover:bg-[#5ED39A]/25'
+                                  : 'bg-[#E66A6A]/15 text-[#E66A6A] border-[#E66A6A]/30 hover:bg-[#E66A6A]/25'
+                              }`}
+                              title={`Click to mark ${targetCar.name} as ${targetCar.available ? 'RESERVED' : 'AVAILABLE'}`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${targetCar.available ? 'bg-[#5ED39A]' : 'bg-[#E66A6A]'}`} />
+                              <span>{targetCar.available ? 'AVAILABLE' : 'RESERVED'}</span>
+                              <span className="text-[9px] opacity-75 font-normal">(Click to switch)</span>
+                            </button>
+                            {!targetCar.available && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onUpdateVehicle({ ...targetCar, available: true });
+                                  setSaveNotification(`${targetCar.name} released and marked AVAILABLE!`);
+                                  setTimeout(() => setSaveNotification(null), 4000);
+                                }}
+                                className="px-2 py-0.5 bg-[#5ED39A]/20 hover:bg-[#5ED39A]/30 text-[#5ED39A] rounded text-[10px] font-semibold cursor-pointer"
+                              >
+                                Release to Available Fleet
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {b.status === 'PAYMENT_PENDING' && (
+                        <button
+                          onClick={() => onUpdateBookingStatus(b.id, 'CONFIRMED')}
+                          className="py-2 px-3 bg-[#5ED39A]/20 hover:bg-[#5ED39A]/30 text-[#5ED39A] text-xs font-bold rounded-lg cursor-pointer whitespace-nowrap"
+                          title="Record that client submitted first deposit"
+                        >
+                          Mark Deposit Paid & Confirm
+                        </button>
+                      )}
+
                       <select
                         value={b.status}
                         onChange={e => onUpdateBookingStatus(b.id, e.target.value)}
                         className="bg-[#181920] border border-[#333] text-xs text-white rounded-lg p-2 focus:border-[#C9A45C]"
                       >
-                        <option value="CONFIRMED">CONFIRMED</option>
+                        <option value="PAYMENT_PENDING">PAYMENT_PENDING (Deposit Pending)</option>
+                        <option value="CONFIRMED">CONFIRMED (Deposit Received)</option>
                         <option value="ACTIVE">ACTIVE</option>
                         <option value="COMPLETED">COMPLETED</option>
                         <option value="CANCELLED">CANCELLED</option>
@@ -459,10 +632,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                       {b.status === 'CANCELLED' && (
                         <button
-                          onClick={() => {
-                            alert(`Refund of ${formatPrice(b.paidAmount)} processed to customer card.`);
-                            onUpdateBookingStatus(b.id, 'REFUNDED');
-                          }}
+                          onClick={() => onUpdateBookingStatus(b.id, 'REFUNDED')}
                           className="py-2 px-3 bg-[#5ED39A]/15 hover:bg-[#5ED39A]/25 text-[#5ED39A] text-xs font-semibold rounded-lg cursor-pointer"
                         >
                           Process Refund
@@ -615,6 +785,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <h4 className="text-lg font-luxury text-white">Edit {editingVehicle.name}</h4>
 
               <div>
+                <label className="block text-xs text-[#AAAAAA] mb-1.5 font-medium">Fleet Status & Availability</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingVehicle({ ...editingVehicle, available: true })}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      editingVehicle.available
+                        ? 'bg-[#5ED39A]/20 text-[#5ED39A] border-[#5ED39A] shadow-md shadow-[#5ED39A]/10 ring-1 ring-[#5ED39A]/30'
+                        : 'bg-[#1C1D24] text-[#888888] border-[#333] hover:text-white hover:border-[#555]'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>AVAILABLE</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingVehicle({ ...editingVehicle, available: false })}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      !editingVehicle.available
+                        ? 'bg-[#E66A6A]/20 text-[#E66A6A] border-[#E66A6A] shadow-md shadow-[#E66A6A]/10 ring-1 ring-[#E66A6A]/30'
+                        : 'bg-[#1C1D24] text-[#888888] border-[#333] hover:text-white hover:border-[#555]'
+                    }`}
+                  >
+                    <AlertCircle className="w-4 h-4" />
+                    <span>RESERVED</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-[#777777] mt-1">
+                  {editingVehicle.available
+                    ? '✓ Currently live and bookable on the luxury fleet catalog.'
+                    : '⚠ Currently marked as Reserved. Switch to AVAILABLE to make bookable.'}
+                </p>
+              </div>
+
+              <div>
                 <label className="block text-xs text-[#AAAAAA] mb-1">Daily Price (₹)</label>
                 <input
                   type="number"
@@ -734,6 +939,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   onChange={e => setNewCarHorsepower(parseInt(e.target.value) || 0)}
                   className="w-full bg-[#1C1D24] border border-[#333] rounded-lg p-2 text-xs text-white"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs text-[#AAAAAA] mb-1.5 font-medium">Initial Fleet Status</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewCarAvailable(true)}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      newCarAvailable
+                        ? 'bg-[#5ED39A]/20 text-[#5ED39A] border-[#5ED39A] shadow-md shadow-[#5ED39A]/10'
+                        : 'bg-[#1C1D24] text-[#888888] border-[#333] hover:text-white'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>AVAILABLE</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewCarAvailable(false)}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      !newCarAvailable
+                        ? 'bg-[#E66A6A]/20 text-[#E66A6A] border-[#E66A6A] shadow-md shadow-[#E66A6A]/10'
+                        : 'bg-[#1C1D24] text-[#888888] border-[#333] hover:text-white'
+                    }`}
+                  >
+                    <AlertCircle className="w-4 h-4" />
+                    <span>RESERVED</span>
+                  </button>
+                </div>
               </div>
 
               <div className="flex gap-2 pt-2">

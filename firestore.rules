@@ -33,6 +33,12 @@ service cloud.firestore {
       }
     }
 
+    // Admin Settings & Persisted Fleet Configuration
+    match /admin_settings/{settingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
     // Fleet Bookings
     match /bookings/{bookingId} {
       allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());

@@ -753,7 +753,7 @@ export const EmergencyAssistanceView: React.FC<EmergencyAssistanceViewProps> = (
                     </div>
                     <div>
                       <div className="text-xs font-bold text-white">Velox 24/7 Priority Hotline</div>
-                      <div className="text-[11px] text-[#888888]">+91 800 835 6900 (Toll Free)</div>
+                      <div className="text-[11px] text-[#888888]">Instant Dispatch & Roadside Assistance (One-Touch)</div>
                     </div>
                   </div>
                   <ArrowRight className="w-4 h-4 text-[#C9A45C]" />

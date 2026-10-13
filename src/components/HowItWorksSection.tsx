@@ -15,8 +15,8 @@ export const HowItWorksSection: React.FC<HowItWorksSectionProps> = ({ onBookNow 
     },
     {
       num: '02',
-      title: 'Digital Verification & Reservation',
-      desc: 'Verify your driving credentials via our automated, privacy-first OCR engine in under 60 seconds. Choose between 100% full payment or a flexible 20% advance deposit.',
+      title: 'Verification & First Deposit',
+      desc: 'Verify your credentials in under 60 seconds. Your booking is confirmed only after the first deposit payment (20% advance or full settlement) is authorized.',
       icon: FileCheck
     },
     {

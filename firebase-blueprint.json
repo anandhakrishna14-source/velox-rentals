@@ -62,6 +62,16 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when added" }
       },
       "required": ["id", "userId", "vehicleId", "createdAt"]
+    },
+    "AdminSetting": {
+      "title": "AdminSetting",
+      "description": "Persisted admin configuration, fleet vehicles, and media",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Setting document ID" },
+        "lastUpdated": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+      },
+      "required": ["lastUpdated"]
     }
   },
   "firestore": {
@@ -80,6 +90,10 @@
     "/users/{userId}/favorites/{favoriteId}": {
       "schema": "Favorite",
       "description": "User wishlist bookmarks"
+    },
+    "/admin_settings/{settingId}": {
+      "schema": "AdminSetting",
+      "description": "Persisted fleet updates and system settings"
     }
   }
 }

@@ -11,7 +11,6 @@ import {
   Pause,
   Upload,
   Video,
-  Box,
   Layers,
   Check,
   Maximize2,
@@ -19,8 +18,8 @@ import {
   Lock,
   Unlock
 } from 'lucide-react';
-import * as THREE from 'three';
 import { useAdminAuth } from '../../context/AdminAuthContext';
+import { persistMediaItem, retrieveMediaItem } from '../../utils/persistentStorage';
 
 interface CarModelAssembly3DProps {
   onBookCar: (vehicleId: string) => void;
@@ -113,13 +112,11 @@ const STAGES: AssemblyStage[] = [
 
 export const CarModelAssembly3D: React.FC<CarModelAssembly3DProps> = ({ onBookCar, onExploreFleet }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Active Stage & Engine mode
+  // Active Stage
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [targetStep, setTargetStep] = useState<number>(1);
-  const [engineMode, setEngineMode] = useState<'VIDEO' | 'WEBGL'>('VIDEO');
 
   // Video turntable playback states
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -137,15 +134,45 @@ export const CarModelAssembly3D: React.FC<CarModelAssembly3DProps> = ({ onBookCa
   const [videoSrc, setVideoSrc] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('velox_porsche_stages_video') || localStorage.getItem('velox_custom_3d_video');
-      if (saved) return saved;
+      if (saved && !saved.startsWith('blob:')) return saved;
+      if (saved && saved.startsWith('blob:')) {
+        try {
+          localStorage.removeItem('velox_porsche_stages_video');
+          localStorage.removeItem('velox_custom_3d_video');
+        } catch {}
+      }
     }
     return 'https://assets.mixkit.co/videos/preview/mixkit-super-car-driving-through-the-city-41270-large.mp4';
   });
 
-  // WebGL 3D states
-  const [isRotating, setIsRotating] = useState<boolean>(true);
-  const [bodyColor, setBodyColor] = useState<string>('#15171C');
-  const threeRef = useRef<any>(null);
+  // Load persisted turntable video across application restarts
+  useEffect(() => {
+    let isMounted = true;
+    retrieveMediaItem('velox_porsche_stages_video').then(url => {
+      if (!isMounted) return;
+      if (url) {
+        setVideoSrc(url);
+        if (videoRef.current) {
+          videoRef.current.src = url;
+          videoRef.current.load();
+          videoRef.current.play().catch(() => {});
+        }
+      } else {
+        retrieveMediaItem('velox_custom_3d_video').then(globalUrl => {
+          if (!isMounted) return;
+          if (globalUrl) {
+            setVideoSrc(globalUrl);
+            if (videoRef.current) {
+              videoRef.current.src = globalUrl;
+              videoRef.current.load();
+              videoRef.current.play().catch(() => {});
+            }
+          }
+        });
+      }
+    });
+    return () => { isMounted = false; };
+  }, []);
 
   // Synchronize video timeline when target step changes
   useEffect(() => {
@@ -240,37 +267,33 @@ export const CarModelAssembly3D: React.FC<CarModelAssembly3DProps> = ({ onBookCa
   };
 
   // Video Upload Handlers
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
-      setVideoSrc(url);
       try {
-        localStorage.setItem('velox_porsche_stages_video', url);
-        localStorage.setItem('velox_custom_3d_video', url);
+        const persistedUrl = await persistMediaItem('velox_porsche_stages_video', file);
+        await persistMediaItem('velox_custom_3d_video', persistedUrl);
+        setVideoSrc(persistedUrl);
+        if (videoRef.current) {
+          videoRef.current.src = persistedUrl;
+          videoRef.current.play().catch(() => {});
+        }
       } catch {
-        // quota
+        const url = URL.createObjectURL(file);
+        setVideoSrc(url);
       }
       setShowVideoUploadModal(false);
       setIsPlaying(true);
-      if (videoRef.current) {
-        videoRef.current.src = url;
-        videoRef.current.play().catch(() => {});
-      }
     }
   };
 
-  const handleUrlSubmit = (e: React.FormEvent) => {
+  const handleUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (customVideoUrlInput.trim()) {
       const url = customVideoUrlInput.trim();
+      await persistMediaItem('velox_porsche_stages_video', url);
+      await persistMediaItem('velox_custom_3d_video', url);
       setVideoSrc(url);
-      try {
-        localStorage.setItem('velox_porsche_stages_video', url);
-        localStorage.setItem('velox_custom_3d_video', url);
-      } catch {
-        // quota
-      }
       setShowVideoUploadModal(false);
       setCustomVideoUrlInput('');
       setIsPlaying(true);
@@ -280,91 +303,6 @@ export const CarModelAssembly3D: React.FC<CarModelAssembly3DProps> = ({ onBookCa
       }
     }
   };
-
-  // WebGL 3D Initialization
-  useEffect(() => {
-    if (engineMode !== 'WEBGL' || !canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#050505');
-    scene.fog = new THREE.FogExp2('#050505', 0.04);
-
-    const camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
-    camera.position.set(0, 2.2, 5.5);
-
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(ambientLight);
-
-    const spotLight = new THREE.SpotLight(0xc9a45c, 3.5);
-    spotLight.position.set(0, 8, 4);
-    scene.add(spotLight);
-
-    // Car Body Representation
-    const carGroup = new THREE.Group();
-    const bodyGeo = new THREE.BoxGeometry(2, 0.6, 4.2);
-    const bodyMat = new THREE.MeshPhysicalMaterial({ color: bodyColor, metalness: 0.8, roughness: 0.2 });
-    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    bodyMesh.position.y = 0.6;
-    carGroup.add(bodyMesh);
-
-    // Wheels
-    const wheelGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.25, 24);
-    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.1 });
-    const positions = [
-      [-1, 0.35, 1.4],
-      [1, 0.35, 1.4],
-      [-1, 0.35, -1.4],
-      [1, 0.35, -1.4]
-    ];
-    positions.forEach(pos => {
-      const wheel = new THREE.Mesh(wheelGeo, wheelMat);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(pos[0], pos[1], pos[2]);
-      carGroup.add(wheel);
-    });
-
-    scene.add(carGroup);
-
-    let animationFrameId: number;
-    const animate = () => {
-      animationFrameId = requestAnimationFrame(animate);
-      if (isRotating) {
-        carGroup.rotation.y += 0.008;
-      }
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    threeRef.current = { scene, camera, renderer, carGroup, bodyMat };
-
-    const handleResize = () => {
-      if (!canvas) return;
-      camera.aspect = canvas.clientWidth / canvas.clientHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-    };
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(animationFrameId);
-      renderer.dispose();
-    };
-  }, [engineMode]);
-
-  // Update WebGL color
-  useEffect(() => {
-    if (threeRef.current?.bodyMat) {
-      threeRef.current.bodyMat.color.set(bodyColor);
-    }
-  }, [bodyColor]);
 
   const currentStageInfo = STAGES[targetStep - 1] || STAGES[0];
 
@@ -385,106 +323,75 @@ export const CarModelAssembly3D: React.FC<CarModelAssembly3DProps> = ({ onBookCa
           </p>
         </div>
 
-        {/* Engine mode switcher & video controls */}
+        {/* Video turntable admin controls */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Video / WebGL Toggle */}
-          <div className="flex items-center bg-[#111114] p-1 rounded-xl border border-white/10">
-            <button
-              type="button"
-              onClick={() => setEngineMode('VIDEO')}
-              className={`py-1.5 px-3 rounded-lg text-xs font-semibold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer ${
-                engineMode === 'VIDEO'
-                  ? 'bg-[#C9A45C] text-[#050505] shadow-md shadow-[#C9A45C]/20'
-                  : 'text-[#999999] hover:text-white'
-              }`}
-            >
-              <Video className="w-3.5 h-3.5" />
-              <span>360° Video Turntable</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setEngineMode('WEBGL')}
-              className={`py-1.5 px-3 rounded-lg text-xs font-semibold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer ${
-                engineMode === 'WEBGL'
-                  ? 'bg-[#C9A45C] text-[#050505] shadow-md shadow-[#C9A45C]/20'
-                  : 'text-[#999999] hover:text-white'
-              }`}
-            >
-              <Box className="w-3.5 h-3.5" />
-              <span>WebGL 3D</span>
-            </button>
+          <div className="flex items-center gap-2 bg-[#111114] py-1.5 px-3 rounded-xl border border-white/10 text-xs font-semibold text-[#DFBD78]">
+            <Video className="w-3.5 h-3.5 text-[#C9A45C]" />
+            <span className="uppercase tracking-wider">360° Video Turntable</span>
           </div>
 
           {/* Change Video Button */}
-          {engineMode === 'VIDEO' && (
-            <button
-              type="button"
-              onClick={() => {
-                requireAdmin(() => setShowVideoUploadModal(true), 'Change 3D Turntable Assembly Video');
-              }}
-              className={`px-3 py-1.5 rounded-xl backdrop-blur-md text-xs font-mono-num flex items-center gap-1.5 transition-all cursor-pointer shadow-lg ${
+          <button
+            type="button"
+            onClick={() => {
+              requireAdmin(() => setShowVideoUploadModal(true), 'Change 3D Turntable Assembly Video');
+            }}
+            className={`px-3 py-1.5 rounded-xl backdrop-blur-md text-xs font-mono-num flex items-center gap-1.5 transition-all cursor-pointer shadow-lg ${
+              isAdmin
+                ? 'bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/50 text-emerald-300'
+                : 'bg-black/80 hover:bg-black/95 border border-amber-500/50 text-amber-300 hover:text-white'
+            }`}
+            title={
+              isAdmin
+                ? 'Admin Active • Click to change 3D assembly video'
+                : 'Admin Login Required • Click to authenticate and change 3D assembly video'
+            }
+          >
+            {isAdmin ? (
+              <Unlock className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <Lock className="w-3.5 h-3.5 text-amber-400" />
+            )}
+            <span className="hidden sm:inline">Change Video</span>
+            <span
+              className={`px-1.5 py-0.5 rounded text-[9px] font-mono-num font-bold uppercase tracking-wider ${
                 isAdmin
-                  ? 'bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/50 text-emerald-300'
-                  : 'bg-black/80 hover:bg-black/95 border border-amber-500/50 text-amber-300 hover:text-white'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
               }`}
-              title={
-                isAdmin
-                  ? 'Admin Active • Click to change 3D assembly video'
-                  : 'Admin Login Required • Click to authenticate and change 3D assembly video'
-              }
             >
-              {isAdmin ? (
-                <Unlock className="w-3.5 h-3.5 text-emerald-400" />
-              ) : (
-                <Lock className="w-3.5 h-3.5 text-amber-400" />
-              )}
-              <span className="hidden sm:inline">Change Video</span>
-              <span
-                className={`px-1.5 py-0.5 rounded text-[9px] font-mono-num font-bold uppercase tracking-wider ${
-                  isAdmin
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                }`}
-              >
-                {isAdmin ? 'ADMIN' : 'ADMIN ONLY'}
-              </span>
-            </button>
-          )}
+              {isAdmin ? 'ADMIN' : 'ADMIN ONLY'}
+            </span>
+          </button>
         </div>
       </div>
 
       {/* Main Interactive Stage Canvas / Video Container */}
       <div
         ref={containerRef}
-        onPointerDown={engineMode === 'VIDEO' ? handleVideoPointerDown : undefined}
-        onPointerMove={engineMode === 'VIDEO' ? handleVideoPointerMove : undefined}
-        onPointerUp={engineMode === 'VIDEO' ? handleVideoPointerUp : undefined}
-        onPointerLeave={engineMode === 'VIDEO' ? handleVideoPointerUp : undefined}
+        onPointerDown={handleVideoPointerDown}
+        onPointerMove={handleVideoPointerMove}
+        onPointerUp={handleVideoPointerUp}
+        onPointerLeave={handleVideoPointerUp}
         className="relative w-full h-[620px] md:h-[720px] cursor-grab active:cursor-grabbing overflow-hidden select-none bg-[#050608]"
       >
-        {engineMode === 'VIDEO' ? (
-          /* ================= 360 VIDEO TURNTABLE PRESENTATION ================= */
-          <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
-            <video
-              ref={videoRef}
-              src={videoSrc}
-              autoPlay
-              loop
-              muted={isMuted}
-              playsInline
-              onTimeUpdate={handleVideoTimeUpdate}
-              className="w-full h-full object-contain pointer-events-none filter brightness-105 contrast-105 drop-shadow-[0_25px_35px_rgba(0,0,0,0.9)]"
-            />
+        {/* ================= 360 VIDEO TURNTABLE PRESENTATION ================= */}
+        <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
+          <video
+            ref={videoRef}
+            src={videoSrc}
+            autoPlay
+            loop
+            muted={isMuted}
+            playsInline
+            onTimeUpdate={handleVideoTimeUpdate}
+            className="w-full h-full object-contain pointer-events-none filter brightness-105 contrast-105 drop-shadow-[0_25px_35px_rgba(0,0,0,0.9)]"
+          />
 
-            {/* Dark Studio Floor and Vignette Overlays */}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-transparent to-[#050505]/40 pointer-events-none" />
-            <div className="absolute bottom-0 inset-x-0 h-44 bg-[radial-gradient(ellipse_at_50%_100%,rgba(201,164,92,0.12)_0%,transparent_75%)] pointer-events-none" />
-          </div>
-        ) : (
-          /* ================= WEBGL 3D MODEL CANVAS ================= */
-          <canvas ref={canvasRef} className="w-full h-full block" />
-        )}
+          {/* Dark Studio Floor and Vignette Overlays */}
+          <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-transparent to-[#050505]/40 pointer-events-none" />
+          <div className="absolute bottom-0 inset-x-0 h-44 bg-[radial-gradient(ellipse_at_50%_100%,rgba(201,164,92,0.12)_0%,transparent_75%)] pointer-events-none" />
+        </div>
 
         {/* Floating HUD: Current Stage Card */}
         <div className="absolute top-6 left-6 md:left-12 max-w-md pointer-events-none z-30">
@@ -509,32 +416,30 @@ export const CarModelAssembly3D: React.FC<CarModelAssembly3DProps> = ({ onBookCa
         </div>
 
         {/* Video Floating Controls (Top Right) */}
-        {engineMode === 'VIDEO' && (
-          <div className="absolute top-6 right-6 md:right-12 z-30 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={togglePlay}
-              className="p-2.5 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/15 text-white hover:text-[#C9A45C] transition-colors cursor-pointer shadow-lg"
-              title={isPlaying ? 'Pause Auto-Spin' : 'Auto-Spin 360°'}
-            >
-              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}
-            </button>
+        <div className="absolute top-6 right-6 md:right-12 z-30 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={togglePlay}
+            className="p-2.5 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/15 text-white hover:text-[#C9A45C] transition-colors cursor-pointer shadow-lg"
+            title={isPlaying ? 'Pause Auto-Spin' : 'Auto-Spin 360°'}
+          >
+            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}
+          </button>
 
-            <button
-              type="button"
-              onClick={toggleSound}
-              className="p-2.5 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/15 text-white hover:text-[#C9A45C] transition-colors cursor-pointer shadow-lg"
-              title={isMuted ? 'Acoustic Exhaust Sound On' : 'Mute'}
-            >
-              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            </button>
+          <button
+            type="button"
+            onClick={toggleSound}
+            className="p-2.5 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/15 text-white hover:text-[#C9A45C] transition-colors cursor-pointer shadow-lg"
+            title={isMuted ? 'Acoustic Exhaust Sound On' : 'Mute'}
+          >
+            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
 
-            <div className="hidden sm:flex items-center gap-2 text-xs text-[#999999] bg-black/70 backdrop-blur-md px-3 py-2 rounded-xl border border-white/10 font-mono-num">
-              <RotateCcw className="w-3.5 h-3.5 text-[#C9A45C]" />
-              <span>Drag to scrub 360°</span>
-            </div>
+          <div className="hidden sm:flex items-center gap-2 text-xs text-[#999999] bg-black/70 backdrop-blur-md px-3 py-2 rounded-xl border border-white/10 font-mono-num">
+            <RotateCcw className="w-3.5 h-3.5 text-[#C9A45C]" />
+            <span>Drag to scrub 360°</span>
           </div>
-        )}
+        </div>
 
         {/* Stage 7 Call to Action overlay */}
         {targetStep === 7 && (

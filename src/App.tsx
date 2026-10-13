@@ -25,6 +25,10 @@ import { EmergencyAssistanceModal } from './components/EmergencyAssistanceModal'
 import { AdminAuthProvider } from './context/AdminAuthContext';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AuthProvider } from './context/AuthContext';
+import { AuthModal } from './components/AuthModal';
+import { MessageSquare } from 'lucide-react';
+import { loadInitialAdminState, saveAllAdminChanges, persistFleetVehicles } from './utils/persistentStorage';
+import { openWhatsAppEnquiry } from './utils/whatsapp';
 
 import {
   INITIAL_VEHICLES,
@@ -49,9 +53,15 @@ export default function App() {
     const saved = localStorage.getItem('velox_vehicles');
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
+        const parsed: Vehicle[] = JSON.parse(saved);
         if (parsed.some((v: any) => v.id === 'porsche-911-gt3' || v.id === 'rolls-royce-ghost')) {
-          return parsed;
+          // Clean out any expired blob URLs from prior browser sessions
+          return parsed.map(v => {
+            const def = INITIAL_VEHICLES.find(iv => iv.id === v.id);
+            const img = v.imageUrl && v.imageUrl.startsWith('blob:') ? (def?.imageUrl || v.imageUrl) : v.imageUrl;
+            const vid = v.videoUrl && v.videoUrl.startsWith('blob:') ? (def?.videoUrl || v.videoUrl) : v.videoUrl;
+            return { ...v, imageUrl: img, videoUrl: vid };
+          });
         }
       } catch {}
     }
@@ -100,6 +110,7 @@ export default function App() {
   const [myBookingsInitialTab, setMyBookingsInitialTab] = useState<TabType>('UPCOMING');
   const [showEmergencyModal, setShowEmergencyModal] = useState<boolean>(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [activePassBooking, setActivePassBooking] = useState<Booking | null>(null);
   const [activeInspectionBooking, setActiveInspectionBooking] = useState<Booking | null>(null);
 
@@ -206,6 +217,31 @@ export default function App() {
     );
   };
 
+  // Pay first deposit on pending reservation
+  const handlePayBookingDeposit = (bookingId: string, depositAmount: number) => {
+    setBookings(prev => {
+      const updated = prev.map(b => {
+        if (b.id === bookingId) {
+          return {
+            ...b,
+            status: 'CONFIRMED' as const,
+            depositPaid: true,
+            depositAmount,
+            paidAmount: depositAmount,
+            balanceAmount: Math.max(0, b.total - depositAmount),
+            depositTransactionId: `TXN-DEP-${Math.floor(100000 + Math.random() * 900000)}`,
+            depositPaidAt: new Date().toISOString()
+          };
+        }
+        return b;
+      });
+      try {
+        localStorage.setItem('velox_bookings', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
   // Booking reschedule callback
   const handleRescheduleBooking = (bookingId: string, newPickupDate: string, newReturnDate: string) => {
     setBookings(prev =>
@@ -226,17 +262,75 @@ export default function App() {
     setFeedbackItems(prev => [newFeedback, ...prev]);
   };
 
-  // Admin vehicle updates
+  // Load initial cloud & persisted state on app boot
+  useEffect(() => {
+    loadInitialAdminState().then(initialState => {
+      if (initialState.vehicles && initialState.vehicles.length > 0) {
+        setVehicles(initialState.vehicles);
+      }
+      if (initialState.pricingSettings) {
+        setPricingSettings(initialState.pricingSettings);
+      }
+      if (initialState.locations) {
+        setLocations(initialState.locations);
+      }
+    });
+
+    const handleAdminSavedEvent = () => {
+      const saved = localStorage.getItem('velox_vehicles');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setVehicles(parsed);
+          }
+        } catch {}
+      }
+    };
+
+    window.addEventListener('velox_admin_saved', handleAdminSavedEvent);
+    return () => window.removeEventListener('velox_admin_saved', handleAdminSavedEvent);
+  }, []);
+
+  // Always keep localStorage updated
+  useEffect(() => {
+    try {
+      localStorage.setItem('velox_vehicles', JSON.stringify(vehicles));
+    } catch {}
+  }, [vehicles]);
+
+  // Admin vehicle updates with instant persistence to LocalStorage and Firestore
   const handleUpdateVehicle = (updatedVehicle: Vehicle) => {
-    setVehicles(prev => prev.map(v => (v.id === updatedVehicle.id ? updatedVehicle : v)));
+    setVehicles(prev => {
+      const updated = prev.map(v => (v.id === updatedVehicle.id ? updatedVehicle : v));
+      persistFleetVehicles(updated);
+      return updated;
+    });
   };
 
   const handleAddVehicle = (newVehicle: Vehicle) => {
-    setVehicles(prev => [newVehicle, ...prev]);
+    setVehicles(prev => {
+      const updated = [newVehicle, ...prev];
+      persistFleetVehicles(updated);
+      return updated;
+    });
   };
 
   const handleDeleteVehicle = (vehicleId: string) => {
-    setVehicles(prev => prev.filter(v => v.id !== vehicleId));
+    setVehicles(prev => {
+      const updated = prev.filter(v => v.id !== vehicleId);
+      persistFleetVehicles(updated);
+      return updated;
+    });
+  };
+
+  const handleSaveAllAdmin = async () => {
+    await saveAllAdminChanges({
+      vehicles,
+      pricingSettings,
+      locations,
+      bookings
+    });
   };
 
   const handleUpdateBookingStatus = (bookingId: string, status: any) => {
@@ -265,6 +359,7 @@ export default function App() {
         }}
         onOpenAdmin={() => setShowAdminDashboard(true)}
         onOpenCompare={() => setShowCompareDrawer(true)}
+        onOpenAuth={() => setShowAuthModal(true)}
         onBookNow={handleGenericBookNow}
       />
 
@@ -316,6 +411,7 @@ export default function App() {
           onOpenCompare={() => setShowCompareDrawer(true)}
           onSelectVehicle={car => setSelectedVehicleForDetail(car)}
           onBookVehicle={car => handleStartBooking(car)}
+          onUpdateVehicle={handleUpdateVehicle}
           filterDates={activeDateFilter}
         />
 
@@ -362,6 +458,19 @@ export default function App() {
           onClose={() => setSelectedVehicleForDetail(null)}
           onToggleWishlist={handleToggleWishlist}
           onBookNow={car => handleStartBooking(car)}
+          activeDates={activeDateFilter ? {
+            pickup: activeDateFilter.pickup,
+            returnDate: activeDateFilter.returnDate,
+            location: activeDateFilter.location
+          } : undefined}
+          onUpdateImage={(vId, newImg) => {
+            const v = vehicles.find(veh => veh.id === vId);
+            if (v) handleUpdateVehicle({ ...v, imageUrl: newImg });
+          }}
+          onUpdateVideo={(vId, newVid) => {
+            const v = vehicles.find(veh => veh.id === vId);
+            if (v) handleUpdateVehicle({ ...v, videoUrl: newVid });
+          }}
         />
       )}
 
@@ -431,6 +540,7 @@ export default function App() {
           onRescheduleBooking={handleRescheduleBooking}
           onOpenDigitalPass={b => setActivePassBooking(b)}
           onOpenInspection={b => setActiveInspectionBooking(b)}
+          onPayDeposit={handlePayBookingDeposit}
         />
       )}
 
@@ -457,8 +567,49 @@ export default function App() {
           onDeleteVehicle={handleDeleteVehicle}
           onUpdateBookingStatus={handleUpdateBookingStatus}
           onUpdatePricingSettings={setPricingSettings}
+          onSaveAllChanges={handleSaveAllAdmin}
         />
       )}
+
+      {/* Floating 24/7 VIP Concierge WhatsApp Button - No phone number displayed on button */}
+      <div className="fixed bottom-6 right-6 z-40 flex items-center">
+        <button
+          type="button"
+          onClick={() => {
+            const activeCar = selectedVehicleForDetail || selectedVehicleForBooking || vehicles[0];
+            openWhatsAppEnquiry({
+              vehicleName: activeCar?.name,
+              category: activeCar?.category,
+              dailyPrice: activeCar?.dailyPrice,
+              pickupDate: activeDateFilter?.pickup,
+              returnDate: activeDateFilter?.returnDate,
+              pickupLocation: activeDateFilter?.location,
+              driverOption: activeDateFilter?.driverOption,
+              currency,
+              enquiryType: 'FULL_ENQUIRY'
+            });
+          }}
+          className="group flex items-center gap-2.5 px-4 py-3 bg-[#25D366] hover:bg-[#20BD5A] text-white rounded-full shadow-2xl shadow-[#25D366]/40 border border-white/20 transition-all duration-300 hover:scale-105 cursor-pointer"
+          title="Direct WhatsApp VIP Enquiry with Selected Dates & Vehicle"
+          aria-label="Direct WhatsApp VIP Enquiry"
+        >
+          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center">
+            <MessageSquare className="w-4 h-4 fill-white text-transparent" />
+          </div>
+          <div className="text-left hidden sm:block">
+            <div className="text-[10px] uppercase font-bold tracking-wider text-black/80 font-mono-num leading-none">
+              VIP Concierge
+            </div>
+            <div className="text-xs font-bold text-white font-mono-num leading-tight">
+              Chat on WhatsApp
+            </div>
+          </div>
+          <span className="text-xs font-bold sm:hidden">WhatsApp</span>
+        </button>
+      </div>
+
+      {/* Global Client Firebase Auth Modal */}
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
 
       {/* Global Admin Login Authentication Modal */}
       <AdminLoginModal />

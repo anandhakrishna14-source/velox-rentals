@@ -21,12 +21,13 @@ import {
 } from 'lucide-react';
 import { Vehicle } from '../types';
 import { useAdminAuth } from '../context/AdminAuthContext';
+import { persistMediaItem, retrieveMediaItem } from '../utils/persistentStorage';
 
 interface StudioTurntable3DSpaceProps {
   vehicle: Vehicle;
   onBookNow?: (vehicle: Vehicle) => void;
   className?: string;
-  initialMode?: 'VIDEO' | 'WEBGL';
+  initialMode?: 'VIDEO';
 }
 
 interface HotspotItem {
@@ -82,16 +83,48 @@ export const StudioTurntable3DSpace: React.FC<StudioTurntable3DSpaceProps> = ({
   const [studioLight, setStudioLight] = useState<'OBSIDIAN' | 'CHAMPAGNE' | 'NEON_CYBER'>('CHAMPAGNE');
   const [cameraPreset, setCameraPreset] = useState<string>('Front 3/4');
 
-  // Video source state: Check if custom video exists for this vehicle or global custom video
+  // Video source state: check vehicle custom video or default
   const [videoSrc, setVideoSrc] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const vehicleSpecific = localStorage.getItem(`velox_3d_video_${vehicle.id}`);
-      if (vehicleSpecific) return vehicleSpecific;
+      if (vehicleSpecific && !vehicleSpecific.startsWith('blob:')) return vehicleSpecific;
+
       const globalCustom = localStorage.getItem('velox_custom_3d_video');
-      if (globalCustom) return globalCustom;
+      if (globalCustom && !globalCustom.startsWith('blob:')) return globalCustom;
+
+      const carVid = localStorage.getItem(`velox_car_video_${vehicle.id}`);
+      if (carVid && !carVid.startsWith('blob:')) return carVid;
     }
-    return vehicle.videoUrl || VIDEO_PRESETS[0].url;
+    return vehicle.videoUrl && !vehicle.videoUrl.startsWith('blob:') ? vehicle.videoUrl : VIDEO_PRESETS[0].url;
   });
+
+  // Load uploaded 3D Space video from IndexedDB across app sessions
+  useEffect(() => {
+    let isMounted = true;
+    async function loadStoredVideo() {
+      const keysToTry = [
+        `velox_3d_video_${vehicle.id}`,
+        'velox_custom_3d_video',
+        `velox_car_video_${vehicle.id}`,
+        `velox_blueprint_video_${vehicle.id}`,
+        'velox_porsche_stages_video'
+      ];
+      for (const k of keysToTry) {
+        try {
+          const stored = await retrieveMediaItem(k);
+          if (stored && isMounted) {
+            setVideoSrc(stored);
+            return;
+          }
+        } catch {}
+      }
+      if (isMounted && vehicle.videoUrl && !vehicle.videoUrl.startsWith('blob:')) {
+        setVideoSrc(vehicle.videoUrl);
+      }
+    }
+    loadStoredVideo();
+    return () => { isMounted = false; };
+  }, [vehicle.id, vehicle.videoUrl]);
 
   const [showVideoModal, setShowVideoModal] = useState<boolean>(false);
   const [customVideoUrlInput, setCustomVideoUrlInput] = useState<string>('');
@@ -237,49 +270,45 @@ export const StudioTurntable3DSpace: React.FC<StudioTurntable3DSpaceProps> = ({
     }
   };
 
-  // Video upload via local file
-  const handleVideoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Video upload via local file with permanent IndexedDB persistence
+  const handleVideoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const blobUrl = URL.createObjectURL(file);
-      setVideoSrc(blobUrl);
-      try {
-        localStorage.setItem(`velox_3d_video_${vehicle.id}`, blobUrl);
-        localStorage.setItem('velox_custom_3d_video', blobUrl);
-      } catch {
-        // quota
-      }
-      setVideoUploadSuccess(`Loaded 3D video file: ${file.name}`);
-      setTimeout(() => setVideoUploadSuccess(null), 4000);
-      setShowVideoModal(false);
+      const sessionUrl = URL.createObjectURL(file);
+      setVideoSrc(sessionUrl);
       setIsPlaying(true);
-      if (videoRef.current) {
-        videoRef.current.src = blobUrl;
-        videoRef.current.play().catch(() => {});
+      setShowVideoModal(false);
+      setVideoUploadSuccess(`3D space video updated: ${file.name}`);
+      setTimeout(() => setVideoUploadSuccess(null), 4000);
+
+      try {
+        const vehicleKey = `velox_3d_video_${vehicle.id}`;
+        await persistMediaItem(vehicleKey, file);
+        await persistMediaItem('velox_custom_3d_video', file);
+      } catch (err) {
+        console.warn('Error saving 3d video to IndexedDB:', err);
       }
     }
   };
 
-  // Video set via custom URL
-  const handleCustomVideoUrlSubmit = (e: React.FormEvent) => {
+  // Video set via custom URL with permanent persistence
+  const handleCustomVideoUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (customVideoUrlInput.trim()) {
       const url = customVideoUrlInput.trim();
       setVideoSrc(url);
-      try {
-        localStorage.setItem(`velox_3d_video_${vehicle.id}`, url);
-        localStorage.setItem('velox_custom_3d_video', url);
-      } catch {
-        // quota
-      }
-      setVideoUploadSuccess('Custom 3D view space video loaded!');
-      setTimeout(() => setVideoUploadSuccess(null), 4000);
       setShowVideoModal(false);
       setCustomVideoUrlInput('');
       setIsPlaying(true);
-      if (videoRef.current) {
-        videoRef.current.src = url;
-        videoRef.current.play().catch(() => {});
+      setVideoUploadSuccess('Custom 3D view space video loaded!');
+      setTimeout(() => setVideoUploadSuccess(null), 4000);
+
+      try {
+        const vehicleKey = `velox_3d_video_${vehicle.id}`;
+        await persistMediaItem(vehicleKey, url);
+        await persistMediaItem('velox_custom_3d_video', url);
+      } catch (err) {
+        console.warn('Error saving custom video url:', err);
       }
     }
   };
@@ -362,6 +391,16 @@ export const StudioTurntable3DSpace: React.FC<StudioTurntable3DSpaceProps> = ({
           muted
           playsInline
           onTimeUpdate={handleTimeUpdate}
+          onError={(e) => {
+            const err = (e.currentTarget as HTMLVideoElement).error;
+            // Ignore normal abort / interrupted loads (code 1)
+            if (err && err.code === 1) return;
+            console.warn('3D space video error code:', err?.code);
+            // Only fall back to default preset if fatal decode failure occurred
+            if (err && err.code >= 2 && videoSrc !== VIDEO_PRESETS[0].url) {
+              setVideoSrc(VIDEO_PRESETS[0].url);
+            }
+          }}
           className="w-full h-full object-cover md:object-contain pointer-events-none filter drop-shadow-[0_25px_35px_rgba(0,0,0,0.85)] brightness-105"
         />
 

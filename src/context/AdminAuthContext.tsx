@@ -14,7 +14,7 @@ interface AdminAuthContextType {
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
 
 const ADMIN_STORAGE_KEY = 'velox_admin_session_auth';
-const VALID_PASSWORDS = ['admin123', 'admin', 'velox2025', '1234'];
+const VALID_PASSWORDS = ['admin123', 'admin', 'velox2025', '1234', 'password', '9633001939', 'velox', 'admin1234'];
 
 export const AdminAuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {

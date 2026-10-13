@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { MapPin, Calendar, Users, Car, ArrowRight, ShieldCheck, CheckCircle2, AlertCircle } from 'lucide-react';
+import { MapPin, Calendar, Users, Car, ArrowRight, ShieldCheck, CheckCircle2, AlertCircle, MessageSquare } from 'lucide-react';
 import { LocationOption, DriverOption } from '../types';
+import { openWhatsAppEnquiry } from '../utils/whatsapp';
 
 interface QuickBookingBarProps {
   locations: LocationOption[];
@@ -127,14 +128,34 @@ export const QuickBookingBar: React.FC<QuickBookingBarProps> = ({
             </select>
           </div>
 
-          {/* 5. CTA Button */}
-          <div>
+          {/* 5. CTA Button & WhatsApp Direct Enquiry */}
+          <div className="flex items-center gap-2">
             <button
               type="submit"
-              className="w-full py-3 px-4 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-[#C9A45C]/25 flex items-center justify-center gap-2 cursor-pointer transform hover:-translate-y-0.5"
+              className="flex-1 py-3 px-3.5 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-[#C9A45C]/25 flex items-center justify-center gap-1.5 cursor-pointer transform hover:-translate-y-0.5"
             >
               <span>FIND CARS</span>
               <ArrowRight className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => openWhatsAppEnquiry({
+                vehicleName: 'Velox Luxury Fleet Reservation',
+                pickupDate,
+                returnDate,
+                pickupLocation: locations.find(l => l.id === pickupLocId)?.name || 'Bangalore VIP Hub',
+                dropoffLocation: dropoffLocId === 'same'
+                  ? locations.find(l => l.id === pickupLocId)?.name
+                  : locations.find(l => l.id === dropoffLocId)?.name,
+                driverOption,
+                enquiryType: 'FULL_ENQUIRY'
+              })}
+              className="py-3 px-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+              title="Full WhatsApp Enquiry with Selected Dates"
+            >
+              <MessageSquare className="w-4 h-4 fill-black text-transparent" />
+              <span className="hidden sm:inline">WhatsApp</span>
             </button>
           </div>
         </form>
@@ -150,8 +171,8 @@ export const QuickBookingBar: React.FC<QuickBookingBarProps> = ({
               <strong className="text-white font-mono-num">{availableCount} cars</strong> available for your dates
             </span>
             <span className="text-[#555555]">|</span>
-            <span className="text-[11px] text-[#999999]">
-              Instant confirmation · Zero deposit upfront option
+            <span className="text-[11px] text-[#C9A45C] font-medium">
+              Booking confirmed only after first deposit payment
             </span>
           </div>
 

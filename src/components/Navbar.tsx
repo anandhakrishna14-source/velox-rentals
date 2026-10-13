@@ -273,13 +273,41 @@ export const Navbar: React.FC<NavbarProps> = ({
             </a>
           </nav>
 
-          <div className="pt-2 flex items-center justify-between gap-2">
+          <div className="pt-2 flex flex-wrap items-center justify-between gap-2">
             <button
               onClick={onToggleCurrency}
               className="px-3 py-2 rounded-lg border border-white/10 text-xs text-white"
             >
               Currency: {currency}
             </button>
+
+            {/* Mobile Auth Button */}
+            {user ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenAuth?.();
+                }}
+                className="px-3 py-2 rounded-lg bg-white/5 border border-[#5ED39A]/40 text-xs text-white flex items-center gap-1.5"
+              >
+                <User className="w-3.5 h-3.5 text-[#5ED39A]" />
+                <span className="truncate max-w-[100px]">{userProfile?.displayName?.split(' ')[0] || user.displayName?.split(' ')[0] || 'VIP'}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenAuth?.();
+                }}
+                className="px-3 py-2 rounded-lg bg-[#C9A45C]/20 border border-[#C9A45C]/40 text-xs font-semibold text-[#DFBD78] flex items-center gap-1.5"
+              >
+                <LogIn className="w-3.5 h-3.5 text-[#C9A45C]" />
+                <span>Sign In</span>
+              </button>
+            )}
+
             {onOpenEmergency && (
               <button
                 onClick={() => {

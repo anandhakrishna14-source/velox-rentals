@@ -1,17 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowRight, Shield, Award, Sparkles, ChevronDown, Play, Pause, Volume2, VolumeX, Upload, Film, MapPin, Lock, Unlock } from 'lucide-react';
+import { ArrowRight, Shield, Award, Sparkles, ChevronDown, Play, Pause, Volume2, VolumeX, Upload, Film, Lock, Unlock, MessageSquare } from 'lucide-react';
 import { useAdminAuth } from '../context/AdminAuthContext';
+import { persistMediaItem, retrieveMediaItem } from '../utils/persistentStorage';
+import { openWhatsAppEnquiry } from '../utils/whatsapp';
 
 interface HeroSectionProps {
   onExploreCars: () => void;
   onBookDrive: () => void;
-  onOpenMap?: () => void;
 }
 
 export const HeroSection: React.FC<HeroSectionProps> = ({
   onExploreCars,
-  onBookDrive,
-  onOpenMap
+  onBookDrive
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -30,6 +30,19 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
     return 'https://assets.mixkit.co/videos/preview/mixkit-super-car-driving-through-the-city-41270-large.mp4';
   });
 
+  // Retrieve persisted video from IndexedDB/Cloud on boot
+  useEffect(() => {
+    retrieveMediaItem('velox_opening_video').then(url => {
+      if (url && url !== videoSrc) {
+        setVideoSrc(url);
+        if (videoRef.current) {
+          videoRef.current.src = url;
+          videoRef.current.play().catch(() => {});
+        }
+      }
+    });
+  }, []);
+
   const togglePlay = () => {
     if (!videoRef.current) return;
     if (isPlaying) {
@@ -47,35 +60,31 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
     setIsMuted(videoRef.current.muted);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
-      setVideoSrc(url);
       try {
-        localStorage.setItem('velox_opening_video', url);
+        const persistedUrl = await persistMediaItem('velox_opening_video', file);
+        setVideoSrc(persistedUrl);
+        if (videoRef.current) {
+          videoRef.current.src = persistedUrl;
+          videoRef.current.play().catch(() => {});
+        }
       } catch {
-        // quota
+        const url = URL.createObjectURL(file);
+        setVideoSrc(url);
       }
       setShowVideoModal(false);
       setIsPlaying(true);
-      if (videoRef.current) {
-        videoRef.current.src = url;
-        videoRef.current.play().catch(() => {});
-      }
     }
   };
 
-  const handleUrlSubmit = (e: React.FormEvent) => {
+  const handleUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (customVideoUrl.trim()) {
       const url = customVideoUrl.trim();
+      await persistMediaItem('velox_opening_video', url);
       setVideoSrc(url);
-      try {
-        localStorage.setItem('velox_opening_video', url);
-      } catch {
-        // quota
-      }
       setShowVideoModal(false);
       setCustomVideoUrl('');
       setIsPlaying(true);
@@ -198,13 +207,19 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
             Explore Fleet
           </button>
 
-          <a
-            href="#fleet-section"
-            className="w-full sm:w-auto py-4 px-6 bg-[#5ED39A]/15 hover:bg-[#5ED39A]/25 border border-[#5ED39A]/40 text-[#5ED39A] font-semibold text-xs md:text-sm tracking-wider uppercase rounded-xl backdrop-blur-md transition-all cursor-pointer flex items-center justify-center gap-1.5"
+          <button
+            type="button"
+            onClick={() => openWhatsAppEnquiry({
+              vehicleName: 'Porsche 911 GT3 (992)',
+              category: 'Flagship Sports',
+              enquiryType: 'FULL_ENQUIRY'
+            })}
+            className="w-full sm:w-auto py-4 px-6 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/50 hover:border-emerald-400 text-emerald-300 hover:text-white font-semibold text-xs md:text-sm tracking-wider uppercase rounded-xl backdrop-blur-md transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40"
+            title="Chat with VIP Concierge on WhatsApp"
           >
-            <MapPin className="w-4 h-4" />
-            <span>Live Fleet Map</span>
-          </a>
+            <MessageSquare className="w-4 h-4 text-emerald-400" />
+            <span>VIP WhatsApp Enquiry</span>
+          </button>
         </div>
 
         {/* Accurate Fleet Lineup Ticker with Authentic Car Marques */}
@@ -265,7 +280,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
           href="#fleet-section"
           className="inline-flex flex-col items-center gap-1.5 text-xs text-[#888888] hover:text-[#C9A45C] transition-colors mt-8 cursor-pointer"
         >
-          <span className="uppercase tracking-[0.2em] text-[10px]">Explore Fleet & Live Map</span>
+          <span className="uppercase tracking-[0.2em] text-[10px]">Explore Luxury Fleet</span>
           <ChevronDown className="w-4 h-4 animate-bounce text-[#C9A45C]" />
         </a>
       </div>

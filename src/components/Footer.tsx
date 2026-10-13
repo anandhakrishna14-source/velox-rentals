@@ -25,8 +25,8 @@ export const Footer: React.FC<FooterProps> = ({
             <p className="text-xs text-[#999999] max-w-sm leading-relaxed">
               DRIVE SOMETHING WORTH REMEMBERING. Premium cars, flexible rentals, and exceptional experiences across premier destinations.
             </p>
-            <div className="text-[11px] text-[#666666] pt-2">
-              Concierge Toll-Free: +91 800 835 6900 · 24/7 Operations
+            <div className="text-[11px] text-[#666666] pt-2 flex items-center gap-2">
+              <span>Dedicated VIP Concierge · 24/7 Premium Handover Operations</span>
             </div>
           </div>
 

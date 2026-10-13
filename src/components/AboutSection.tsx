@@ -1,10 +1,15 @@
 import React, { useState } from 'react';
 import { ChevronDown, Phone, Mail, MapPin, ShieldCheck, Clock, MessageSquare } from 'lucide-react';
+import { openWhatsAppEnquiry } from '../utils/whatsapp';
 
 export const AboutSection: React.FC = () => {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   const faqs = [
+    {
+      q: 'When is my luxury reservation officially confirmed?',
+      a: 'Your booking is confirmed only after the first deposit payment (20% advance booking deposit or 100% full settlement) is successfully authorized. Unpaid holds remain tentative for a 30-minute grace window before vehicle dates are released back to our fleet availability.'
+    },
     {
       q: 'How does the refundable security deposit work?',
       a: 'The security deposit is temporarily pre-authorized on your credit or debit card at the time of booking. Upon vehicle inspection at drop-off, the authorization is released automatically within 24–48 hours, provided no municipal traffic violations were incurred.'
@@ -67,7 +72,7 @@ export const AboutSection: React.FC = () => {
             <div className="space-y-4 text-xs">
               <div className="flex items-center gap-3 text-[#CCCCCC]">
                 <Phone className="w-4 h-4 text-[#C9A45C]" />
-                <span>+91 800 835 6900 (Toll-Free 24/7)</span>
+                <span>Dedicated 24/7 VIP Concierge Hotline</span>
               </div>
               <div className="flex items-center gap-3 text-[#CCCCCC]">
                 <Mail className="w-4 h-4 text-[#C9A45C]" />
@@ -83,15 +88,17 @@ export const AboutSection: React.FC = () => {
               </div>
             </div>
 
-            <a
-              href="https://api.whatsapp.com/send?phone=918008356900&text=Hello%20Velox%20Drive%20Concierge"
-              target="_blank"
-              rel="noreferrer"
-              className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors"
+            <button
+              type="button"
+              onClick={() => openWhatsAppEnquiry({
+                enquiryType: 'DIRECT_CHAT',
+                customNote: 'VIP Concierge Enquiry: Requesting consultation for bespoke luxury car rental requirements.'
+              })}
+              className="w-full py-3 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 hover:border-emerald-500 text-emerald-200 hover:text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-md"
             >
               <MessageSquare className="w-4 h-4 text-[#5ED39A]" />
               <span>Connect on WhatsApp VIP</span>
-            </a>
+            </button>
           </div>
         </div>
 

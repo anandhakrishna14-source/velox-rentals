@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Heart, Users, Gauge, Fuel, Zap, ArrowRight, ShieldCheck, Check, Star, Scale, AlertCircle, MapPin, LayoutGrid, Radio } from 'lucide-react';
+import { Heart, Users, Gauge, Fuel, Zap, ArrowRight, ShieldCheck, Check, Star, Scale, AlertCircle, LayoutGrid, MessageSquare } from 'lucide-react';
 import { Vehicle } from '../types';
 import { VehicleVisualCard } from './VehicleVisualCard';
-import { FleetInteractiveMap } from './FleetInteractiveMap';
+import { openWhatsAppEnquiry, getUpcomingDateString } from '../utils/whatsapp';
 
 interface FleetSectionProps {
   vehicles: Vehicle[];
@@ -14,6 +14,7 @@ interface FleetSectionProps {
   onOpenCompare: () => void;
   onSelectVehicle: (vehicle: Vehicle) => void;
   onBookVehicle: (vehicle: Vehicle) => void;
+  onUpdateVehicle?: (vehicle: Vehicle) => void;
   filterDates?: { pickup: string; returnDate: string; location: string };
 }
 
@@ -27,11 +28,11 @@ export const FleetSection: React.FC<FleetSectionProps> = ({
   onOpenCompare,
   onSelectVehicle,
   onBookVehicle,
+  onUpdateVehicle,
   filterDates
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [hoveredCarId, setHoveredCarId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'GRID' | 'MAP'>('GRID');
 
   const categories = ['ALL', 'Sports', 'Performance', 'Luxury', 'Comfort', 'Luxury SUV'];
 
@@ -75,10 +76,12 @@ export const FleetSection: React.FC<FleetSectionProps> = ({
             vehicle={vehicle}
             isHovered={isHovered}
             onUpdateImage={(vId, newImg) => {
-              vehicle.imageUrl = newImg;
+              const updated = { ...vehicle, imageUrl: newImg };
+              if (onUpdateVehicle) onUpdateVehicle(updated);
             }}
             onUpdateVideo={(vId, newVid) => {
-              vehicle.videoUrl = newVid;
+              const updated = { ...vehicle, videoUrl: newVid };
+              if (onUpdateVehicle) onUpdateVehicle(updated);
             }}
           />
 
@@ -212,6 +215,26 @@ export const FleetSection: React.FC<FleetSectionProps> = ({
                 </button>
               )}
             </div>
+
+            {/* Direct WhatsApp VIP Enquiry Button - No phone number shown on button */}
+            <button
+              type="button"
+              onClick={() => openWhatsAppEnquiry({
+                vehicleName: vehicle.name,
+                category: vehicle.category,
+                dailyPrice: vehicle.dailyPrice,
+                pickupDate: filterDates?.pickup || getUpcomingDateString(1),
+                returnDate: filterDates?.returnDate || getUpcomingDateString(3),
+                pickupLocation: filterDates?.location || 'Bangalore VIP Hub',
+                currency,
+                enquiryType: 'FULL_ENQUIRY'
+              })}
+              className="mt-2.5 w-full py-2 px-3 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/30 hover:border-emerald-500/60 text-emerald-300 hover:text-white text-xs font-mono-num rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+              title="Direct VIP WhatsApp enquiry"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Full Enquiry via WhatsApp</span>
+            </button>
           </div>
         </div>
       </div>
@@ -239,91 +262,24 @@ export const FleetSection: React.FC<FleetSectionProps> = ({
             </p>
           </div>
 
-          {/* Right Controls: View Switcher (Grid vs Interactive Map) & Category Filter Tabs */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-            {/* View Mode Toggle */}
-            <div className="flex items-center gap-1 bg-[#0E0F14] p-1.5 rounded-xl border border-white/10">
+          {/* Category Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-1.5 bg-[#0D0D0E] p-1.5 rounded-xl border border-[#222222]">
+            {categories.map(cat => (
               <button
+                key={cat}
                 type="button"
-                onClick={() => setViewMode('GRID')}
-                className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                  viewMode === 'GRID'
-                    ? 'bg-[#C9A45C] text-[#050505] shadow-md shadow-[#C9A45C]/20'
-                    : 'text-[#999999] hover:text-white'
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-3.5 py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                  selectedCategory === cat
+                    ? 'bg-white/15 text-white font-semibold'
+                    : 'text-[#999999] hover:text-white hover:bg-white/5'
                 }`}
               >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                <span>Fleet Grid</span>
+                {cat === 'ALL' ? 'All Fleet' : cat}
               </button>
-
-              <button
-                type="button"
-                onClick={() => setViewMode('MAP')}
-                className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                  viewMode === 'MAP'
-                    ? 'bg-[#C9A45C] text-[#050505] shadow-md shadow-[#C9A45C]/20'
-                    : 'text-[#999999] hover:text-white'
-                }`}
-              >
-                <MapPin className="w-3.5 h-3.5 text-[#5ED39A]" />
-                <span>Live GPS Map</span>
-              </button>
-            </div>
-
-            {/* Category Filter Tabs */}
-            <div className="flex flex-wrap items-center gap-1.5 bg-[#0D0D0E] p-1.5 rounded-xl border border-[#222222]">
-              {categories.map(cat => (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3.5 py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                    selectedCategory === cat
-                      ? 'bg-white/15 text-white font-semibold'
-                      : 'text-[#999999] hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  {cat === 'ALL' ? 'All Fleet' : cat}
-                </button>
-              ))}
-            </div>
+            ))}
           </div>
         </div>
-
-        {/* ================= INTERACTIVE FLEET GPS MAP ================= */}
-        {viewMode === 'MAP' ? (
-          <FleetInteractiveMap
-            vehicles={vehicles}
-            currency={currency}
-            onSelectVehicle={onSelectVehicle}
-            onBookVehicle={onBookVehicle}
-          />
-        ) : (
-          /* Quick GPS Map Bar (allows 1-click preview of map) */
-          <div className="mb-8 p-3.5 bg-gradient-to-r from-[#0E0F14] via-[#14161F] to-[#0E0F14] border border-[#5ED39A]/30 rounded-2xl flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#5ED39A] animate-ping" />
-              <div className="text-xs">
-                <span className="text-white font-semibold flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-[#5ED39A]" />
-                  Real-Time Fleet GPS Tracking Active Across Bangalore, Mumbai, Delhi & Goa
-                </span>
-                <span className="text-[#888888] text-[11px]">
-                  {availableCars.length} vehicles positioned at VIP airport lanes & concierge hubs.
-                </span>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setViewMode('MAP')}
-              className="py-1.5 px-3 bg-[#5ED39A]/15 hover:bg-[#5ED39A]/25 border border-[#5ED39A]/40 text-[#5ED39A] text-xs font-mono-num rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
-            >
-              <span>Launch Interactive Map</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
 
         {/* Dynamic Availability Status Header (Item 2) */}
         {filterDates && (

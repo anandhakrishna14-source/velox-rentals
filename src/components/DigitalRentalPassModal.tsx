@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, QrCode, Phone, MessageSquare, Download, MapPin, Calendar, Clock, ShieldCheck, Car, Share2 } from 'lucide-react';
+import { X, QrCode, Phone, MessageSquare, Download, MapPin, Calendar, Clock, ShieldCheck, Car, Share2, AlertCircle } from 'lucide-react';
 import { Booking } from '../types';
 
 interface DigitalRentalPassModalProps {
@@ -17,8 +17,10 @@ export const DigitalRentalPassModal: React.FC<DigitalRentalPassModalProps> = ({
 
   const [activeTab, setActiveTab] = useState<'PASS' | 'CHAUFFEUR' | 'INSPECTION'>('PASS');
   const [copied, setCopied] = useState<boolean>(false);
+  const [contactNotification, setContactNotification] = useState<string | null>(null);
 
   const isChauffeur = booking.driverOption === 'WITH_DRIVER';
+  const isPendingDeposit = booking.status === 'PAYMENT_PENDING';
 
   const handleShare = () => {
     navigator.clipboard?.writeText(
@@ -34,9 +36,9 @@ export const DigitalRentalPassModal: React.FC<DigitalRentalPassModalProps> = ({
         {/* Pass Top Bar */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#08080A]">
           <div className="flex items-center gap-2.5">
-            <span className="w-2 h-2 rounded-full bg-[#5ED39A] animate-pulse" />
+            <span className={`w-2 h-2 rounded-full ${isPendingDeposit ? 'bg-amber-400 animate-ping' : 'bg-[#5ED39A] animate-pulse'}`} />
             <span className="text-xs uppercase tracking-widest text-[#C9A45C] font-semibold">
-              VELOX DRIVE · VIP DIGITAL PASS
+              {isPendingDeposit ? 'VELOX DRIVE · TENTATIVE PASS (AWAITING DEPOSIT)' : 'VELOX DRIVE · VIP DIGITAL PASS'}
             </span>
           </div>
 
@@ -66,8 +68,10 @@ export const DigitalRentalPassModal: React.FC<DigitalRentalPassModalProps> = ({
               </div>
               <div className="text-right">
                 <span className="text-[10px] font-mono-num text-[#888888] block">BOOKING REF</span>
-                <span className="text-sm font-mono-num font-bold text-[#C9A45C] bg-[#C9A45C]/10 px-2 py-0.5 rounded">
-                  {booking.id}
+                <span className={`text-sm font-mono-num font-bold px-2 py-0.5 rounded ${
+                  isPendingDeposit ? 'text-amber-400 bg-amber-500/15 border border-amber-500/30' : 'text-[#C9A45C] bg-[#C9A45C]/10'
+                }`}>
+                  #{booking.id}
                 </span>
               </div>
             </div>
@@ -83,6 +87,16 @@ export const DigitalRentalPassModal: React.FC<DigitalRentalPassModalProps> = ({
                 Full Tank · 150-Point Pre-Delivery Inspection Cleared
               </div>
             </div>
+
+            {/* Deposit Policy Notice for Pending Reservations */}
+            {isPendingDeposit && (
+              <div className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-xl flex items-center gap-2 mb-4 text-xs">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="text-amber-200 text-[11px] leading-tight">
+                  <strong>Tentative Pass:</strong> Booking confirmed only after first deposit payment is received.
+                </span>
+              </div>
+            )}
 
             {/* Route / Schedule Boarding Grid */}
             <div className="p-3.5 bg-[#090A0D] rounded-xl border border-white/5 space-y-3 mb-5 font-mono-num text-xs">
@@ -118,18 +132,17 @@ export const DigitalRentalPassModal: React.FC<DigitalRentalPassModalProps> = ({
                   SHOW TO VALET / AIRPORT CONCIERGE
                 </span>
                 <div className="text-xs text-[#DDDDDD] font-mono-num font-semibold">
-                  SECURITY CODE: <span className="text-[#C9A45C]">#VX-{booking.id.slice(-4)}</span>
+                  SECURITY CODE: <span className="text-[#C9A45C]">{isPendingDeposit ? 'PENDING DEPOSIT' : `#VX-${booking.id.slice(-4)}`}</span>
                 </div>
-                <div className="text-[10px] text-[#5ED39A] flex items-center gap-1">
+                <div className={`text-[10px] flex items-center gap-1 ${isPendingDeposit ? 'text-amber-400' : 'text-[#5ED39A]'}`}>
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Identity Verified ✓</span>
+                  <span>{isPendingDeposit ? 'Deposit Pending Verification' : 'Identity Verified ✓'}</span>
                 </div>
               </div>
 
               {/* Vector Simulated QR Code */}
               <div className="p-2 bg-white rounded-lg shadow-md shrink-0">
                 <svg viewBox="0 0 100 100" className="w-16 h-16">
-                  {/* Outer position boxes */}
                   <rect x="5" y="5" width="28" height="28" fill="#000" />
                   <rect x="9" y="9" width="20" height="20" fill="#fff" />
                   <rect x="13" y="13" width="12" height="12" fill="#000" />
@@ -142,7 +155,6 @@ export const DigitalRentalPassModal: React.FC<DigitalRentalPassModalProps> = ({
                   <rect x="9" y="71" width="20" height="20" fill="#fff" />
                   <rect x="13" y="75" width="12" height="12" fill="#000" />
 
-                  {/* Random pattern data cells */}
                   <rect x="38" y="8" width="6" height="6" fill="#000" />
                   <rect x="48" y="8" width="12" height="6" fill="#000" />
                   <rect x="38" y="20" width="18" height="6" fill="#000" />
@@ -158,14 +170,22 @@ export const DigitalRentalPassModal: React.FC<DigitalRentalPassModalProps> = ({
             </div>
           </div>
 
+          {contactNotification && (
+            <div className="p-3 bg-[#C9A45C]/15 border border-[#C9A45C]/40 text-[#C9A45C] text-xs rounded-xl text-center font-medium animate-fadeIn">
+              {contactNotification}
+            </div>
+          )}
+
           {/* Section 8: YOUR PICKUP Spec Box */}
           <div className="p-4 bg-[#111217] border border-[#2A2B33] rounded-2xl space-y-3">
             <div className="flex items-center justify-between border-b border-white/5 pb-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-[#C9A45C]">
                 YOUR PICKUP
               </span>
-              <span className="text-[11px] font-mono-num text-[#5ED39A] bg-[#5ED39A]/10 px-2 py-0.5 rounded">
-                Confirmed & Ready
+              <span className={`text-[11px] font-mono-num px-2 py-0.5 rounded ${
+                isPendingDeposit ? 'text-amber-400 bg-amber-500/15 border border-amber-500/30' : 'text-[#5ED39A] bg-[#5ED39A]/10'
+              }`}>
+                {isPendingDeposit ? 'Awaiting First Deposit' : 'Confirmed & Ready'}
               </span>
             </div>
 
@@ -191,7 +211,9 @@ export const DigitalRentalPassModal: React.FC<DigitalRentalPassModalProps> = ({
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] text-[#777777] block uppercase">Pickup code:</span>
-                  <span className="font-mono-num font-bold text-[#C9A45C] text-sm">#VX{booking.id.replace(/[^0-9]/g, '') || '7284'}</span>
+                  <span className="font-mono-num font-bold text-[#C9A45C] text-sm">
+                    {isPendingDeposit ? 'PENDING DEPOSIT' : `#VX${booking.id.replace(/[^0-9]/g, '') || '7284'}`}
+                  </span>
                 </div>
               </div>
             </div>
@@ -209,7 +231,10 @@ export const DigitalRentalPassModal: React.FC<DigitalRentalPassModalProps> = ({
 
               <button
                 type="button"
-                onClick={() => alert(`Connecting you to Velox Ground Concierge for booking ${booking.id}...`)}
+                onClick={() => {
+                  setContactNotification(`Connecting to Velox Concierge Dispatch for booking #${booking.id}...`);
+                  setTimeout(() => setContactNotification(null), 3000);
+                }}
                 className="py-2 px-2 bg-white/5 hover:bg-white/10 text-center rounded-lg text-[11px] text-[#DDDDDD] border border-white/10 hover:border-white/20 transition-colors cursor-pointer"
               >
                 CONTACT DRIVER

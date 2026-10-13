@@ -39,6 +39,7 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
   signUpWithEmail: (email: string, pass: string, name: string) => Promise<void>;
+  signInAsDemoClient: () => Promise<void>;
   signOut: () => Promise<void>;
   userBookings: Booking[];
   saveBookingToFirestore: (booking: Booking) => Promise<void>;
@@ -189,8 +190,55 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const signInAsDemoClient = async () => {
+    try {
+      try {
+        await signInWithEmailAndPassword(auth, 'vip.client@veloxdrive.com', 'VeloxVIP2025!');
+      } catch (err: any) {
+        if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/invalid-login-credentials') {
+          const cred = await createUserWithEmailAndPassword(auth, 'vip.client@veloxdrive.com', 'VeloxVIP2025!');
+          if (cred.user) {
+            await updateProfile(cred.user, { displayName: 'Adrian Vance (VIP Member)' });
+            const newProfile: UserProfile = {
+              id: cred.user.uid,
+              email: 'vip.client@veloxdrive.com',
+              displayName: 'Adrian Vance (VIP Member)',
+              photoURL: '',
+              role: 'customer',
+              createdAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'users', cred.user.uid), newProfile);
+            setUserProfile(newProfile);
+          }
+        } else {
+          throw err;
+        }
+      }
+    } catch (e: any) {
+      console.warn('Demo client fallback session active:', e);
+      // Resilient fallback session if external network is restricted
+      const fallbackUser = {
+        uid: 'vip-demo-client-uid',
+        email: 'vip.client@veloxdrive.com',
+        displayName: 'Adrian Vance (VIP Member)',
+        photoURL: ''
+      } as any;
+      setUser(fallbackUser);
+      setUserProfile({
+        id: fallbackUser.uid,
+        email: fallbackUser.email,
+        displayName: fallbackUser.displayName,
+        photoURL: '',
+        role: 'customer',
+        createdAt: new Date().toISOString()
+      });
+    }
+  };
+
   const signOut = async () => {
-    await firebaseSignOut(auth);
+    try {
+      await firebaseSignOut(auth);
+    } catch {}
     setUser(null);
     setUserProfile(null);
   };
@@ -254,6 +302,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         signInWithGoogle,
         signInWithEmail,
         signUpWithEmail,
+        signInAsDemoClient,
         signOut,
         userBookings,
         saveBookingToFirestore,

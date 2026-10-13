@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Vehicle } from '../types';
 import { useAdminAuth } from '../context/AdminAuthContext';
+import { persistMediaItem, retrieveMediaItem } from '../utils/persistentStorage';
 
 interface BlueprintVideoViewerProps {
   vehicle: Vehicle;
@@ -29,6 +30,8 @@ interface BlueprintVideoViewerProps {
   onBookNow?: (vehicle: Vehicle) => void;
   className?: string;
   onUpdateVideo?: (url: string) => void;
+  isAdmin?: boolean;
+  onOpenAdminLogin?: () => void;
 }
 
 const BLUEPRINT_PRESETS = [
@@ -86,16 +89,13 @@ export const BlueprintVideoViewer: React.FC<BlueprintVideoViewerProps> = ({
 
   // Sync video source if vehicle prop changes
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        setVideoSrc(saved);
-        return;
+    retrieveMediaItem(storageKey).then(persistedUrl => {
+      if (persistedUrl) {
+        setVideoSrc(persistedUrl);
+      } else if (vehicle.videoUrl) {
+        setVideoSrc(vehicle.videoUrl);
       }
-    }
-    if (vehicle.videoUrl) {
-      setVideoSrc(vehicle.videoUrl);
-    }
+    });
   }, [vehicle.id, storageKey]);
 
   // Color theme palettes for CAD Blueprint
@@ -145,17 +145,18 @@ export const BlueprintVideoViewer: React.FC<BlueprintVideoViewerProps> = ({
     setIsMuted(!isMuted);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const blobUrl = URL.createObjectURL(file);
-      setVideoSrc(blobUrl);
       try {
-        localStorage.setItem(storageKey, blobUrl);
+        const persistedUrl = await persistMediaItem(storageKey, file);
+        setVideoSrc(persistedUrl);
+        if (onUpdateVideo) onUpdateVideo(persistedUrl);
       } catch {
-        // storage quota fallback
+        const fallback = URL.createObjectURL(file);
+        setVideoSrc(fallback);
+        if (onUpdateVideo) onUpdateVideo(fallback);
       }
-      if (onUpdateVideo) onUpdateVideo(blobUrl);
       setUploadSuccess(`Uploaded "${file.name}" to Blueprint!`);
       setTimeout(() => {
         setUploadSuccess(null);
@@ -165,14 +166,12 @@ export const BlueprintVideoViewer: React.FC<BlueprintVideoViewerProps> = ({
     }
   };
 
-  const handleUrlSubmit = (e: React.FormEvent) => {
+  const handleUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (customUrlInput.trim()) {
       const url = customUrlInput.trim();
+      await persistMediaItem(storageKey, url);
       setVideoSrc(url);
-      try {
-        localStorage.setItem(storageKey, url);
-      } catch {}
       if (onUpdateVideo) onUpdateVideo(url);
       setUploadSuccess('Custom Video URL applied to Blueprint!');
       setTimeout(() => {

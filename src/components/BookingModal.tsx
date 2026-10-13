@@ -22,10 +22,12 @@ import {
   ShieldCheck,
   Sparkles,
   Crown,
-  Award
+  Award,
+  MessageSquare
 } from 'lucide-react';
 import { Vehicle, LocationOption, Booking, DriverOption, PaymentStructure, PricingSettings, RewardsTier } from '../types';
 import { REWARDS_TIERS, calculateRentalPoints } from '../utils/rewards';
+import { openWhatsAppEnquiry } from '../utils/whatsapp';
 
 interface BookingModalProps {
   vehicle: Vehicle | null;
@@ -98,9 +100,15 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   const [customerName, setCustomerName] = useState<string>('Rahul K.');
   const [customerEmail, setCustomerEmail] = useState<string>('rahul.k@example.com');
   const [customerPhone, setCustomerPhone] = useState<string>('+91 98201 44821');
-  const [paymentStructure, setPaymentStructure] = useState<PaymentStructure>('FULL');
+  const [paymentStructure, setPaymentStructure] = useState<PaymentStructure>('DEPOSIT');
   const [paymentMethod, setPaymentMethod] = useState<'CARD' | 'UPI' | 'NETBANKING'>('CARD');
+  const [cardNumber, setCardNumber] = useState<string>('•••• •••• •••• 4242');
+  const [cardExpiry, setCardExpiry] = useState<string>('08/29');
+  const [cardCvv, setCardCvv] = useState<string>('•••');
+  const [upiId, setUpiId] = useState<string>('vip@okaxis');
+  const [netBank, setNetBank] = useState<string>('HDFC VIP Private Banking');
   const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
+  const [processingStatusText, setProcessingStatusText] = useState<string>('Authorizing Deposit...');
 
   // Confirmed booking result
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
@@ -216,9 +224,10 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     }, 1100);
   };
 
-  // Process Booking & Authorization
-  const handleProcessPayment = () => {
+  // Process Booking & Authorization (Booking confirmed only after first deposit payment)
+  const handleProcessPayment = (asTentativeHold: boolean = false) => {
     setIsProcessingPayment(true);
+    setProcessingStatusText(asTentativeHold ? 'Reserving Tentative Hold...' : 'Authorizing First Deposit Gateway...');
 
     setTimeout(() => {
       setIsProcessingPayment(false);
@@ -226,8 +235,14 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       const pickupLoc = locations.find(l => l.id === pickupLocId)?.name || 'Bangalore Int. Airport';
       const dropoffLoc = sameDropoff ? pickupLoc : locations.find(l => l.id === dropoffLocId)?.name || pickupLoc;
 
-      const paidAmount = paymentStructure === 'FULL' ? pricingCalculations.rentalPayableToday : pricingCalculations.advancePayableToday;
-      const balanceAmount = paymentStructure === 'FULL' ? 0 : pricingCalculations.balanceDueHandover;
+      const firstDepositAmount = paymentStructure === 'FULL'
+        ? pricingCalculations.rentalPayableToday
+        : pricingCalculations.advancePayableToday;
+
+      const paidAmount = asTentativeHold ? 0 : firstDepositAmount;
+      const balanceAmount = asTentativeHold
+        ? pricingCalculations.totalAuthorization
+        : (paymentStructure === 'FULL' ? 0 : pricingCalculations.balanceDueHandover);
 
       const newBooking: Booking = {
         id: `VX${Math.floor(1000 + Math.random() * 9000)}`,
@@ -252,7 +267,11 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         paidAmount,
         balanceAmount,
         paymentStructure,
-        status: 'CONFIRMED',
+        status: asTentativeHold ? 'PAYMENT_PENDING' : 'CONFIRMED',
+        depositPaid: !asTentativeHold,
+        depositAmount: firstDepositAmount,
+        depositTransactionId: !asTentativeHold ? `TXN-DEP-${Math.floor(100000 + Math.random() * 900000)}` : undefined,
+        depositPaidAt: !asTentativeHold ? new Date().toISOString() : undefined,
         customerName,
         customerEmail,
         customerPhone,
@@ -264,33 +283,83 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       setConfirmedBooking(newBooking);
       onBookingConfirmed(newBooking);
 
-      // Credit Velox Rewards Points to Profile
+      if (!asTentativeHold) {
+        // Credit Velox Rewards Points to Profile upon confirmed booking with deposit
+        try {
+          const saved = localStorage.getItem('velox_rewards_profile');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            const pts = pricingCalculations.pointsToEarn;
+            const newRecord = {
+              id: `REW-${newBooking.id}`,
+              bookingId: newBooking.id,
+              vehicleName: newBooking.vehicleName,
+              rentalDate: newBooking.pickupDate,
+              durationDays: newBooking.durationDays,
+              spendAmount: newBooking.total,
+              basePoints: pts.basePoints,
+              bonusPoints: pts.bonusPoints,
+              totalPoints: pts.totalPoints,
+              status: 'CREDITED',
+              reason: `${newBooking.durationDays} Days Rental · ${newBooking.pickupLocation.split('(')[0].trim()}`
+            };
+            parsed.records = [newRecord, ...(parsed.records || [])];
+            parsed.totalPoints = (parsed.totalPoints || 0) + pts.totalPoints;
+            localStorage.setItem('velox_rewards_profile', JSON.stringify(parsed));
+          }
+        } catch {}
+      }
+
+      setStep(7); // Status screen
+    }, 1500);
+  };
+
+  // Immediate deposit payment from Step 7 if reserved as tentative
+  const handlePayStep7Deposit = () => {
+    if (!confirmedBooking) return;
+    setIsProcessingPayment(true);
+    setProcessingStatusText('Processing First Deposit Payment...');
+
+    setTimeout(() => {
+      setIsProcessingPayment(false);
+      const depositAmt = confirmedBooking.depositAmount || pricingCalculations.advancePayableToday;
+      const updated: Booking = {
+        ...confirmedBooking,
+        status: 'CONFIRMED',
+        depositPaid: true,
+        paidAmount: depositAmt,
+        balanceAmount: Math.max(0, confirmedBooking.total - depositAmt),
+        depositTransactionId: `TXN-DEP-${Math.floor(100000 + Math.random() * 900000)}`,
+        depositPaidAt: new Date().toISOString()
+      };
+
+      setConfirmedBooking(updated);
+      onBookingConfirmed(updated);
+
       try {
         const saved = localStorage.getItem('velox_rewards_profile');
         if (saved) {
           const parsed = JSON.parse(saved);
           const pts = pricingCalculations.pointsToEarn;
           const newRecord = {
-            id: `REW-${newBooking.id}`,
-            bookingId: newBooking.id,
-            vehicleName: newBooking.vehicleName,
-            rentalDate: newBooking.pickupDate,
-            durationDays: newBooking.durationDays,
-            spendAmount: newBooking.total,
+            id: `REW-${updated.id}`,
+            bookingId: updated.id,
+            vehicleName: updated.vehicleName,
+            rentalDate: updated.pickupDate,
+            durationDays: updated.durationDays,
+            spendAmount: updated.total,
             basePoints: pts.basePoints,
             bonusPoints: pts.bonusPoints,
             totalPoints: pts.totalPoints,
             status: 'CREDITED',
-            reason: `${newBooking.durationDays} Days Rental · ${newBooking.pickupLocation.split('(')[0].trim()}`
+            reason: `${updated.durationDays} Days Rental · ${updated.pickupLocation.split('(')[0].trim()}`
           };
           parsed.records = [newRecord, ...(parsed.records || [])];
           parsed.totalPoints = (parsed.totalPoints || 0) + pts.totalPoints;
           localStorage.setItem('velox_rewards_profile', JSON.stringify(parsed));
         }
       } catch {}
-
-      setStep(7); // Confirmed screen
-    }, 1600);
+    }, 1400);
   };
 
   const stepsList = [
@@ -440,6 +509,48 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                   <div className="text-xs font-mono-num text-[#5ED39A]">
                     Complimentary 250km/day included
                   </div>
+                </div>
+
+                {/* Instant WhatsApp Enquiry Card (Direct to 9633001939) */}
+                <div className="p-4 bg-emerald-950/40 border border-emerald-500/30 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                      <MessageSquare className="w-5 h-5 text-emerald-400" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-2">
+                        <span>Prefer Direct WhatsApp Enquiry?</span>
+                        <span className="text-[10px] font-mono-num text-emerald-300 bg-emerald-900/60 px-2 py-0.5 rounded-full border border-emerald-500/40">
+                          Instant VIP Concierge
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[#A0A0A0]">
+                        Send selected dates ({pickupDate} → {returnDate}) for {vehicle.name} directly to our VIP concierge.
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => openWhatsAppEnquiry({
+                      vehicleName: vehicle.name,
+                      category: vehicle.category,
+                      pickupDate,
+                      pickupTime,
+                      returnDate,
+                      returnTime,
+                      pickupLocation: locations.find(l => l.id === pickupLocId)?.name || 'Bangalore VIP Hub',
+                      driverOption,
+                      dailyPrice: vehicle.dailyPrice,
+                      currency,
+                      enquiryType: 'FULL_ENQUIRY'
+                    })}
+                    className="py-2.5 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-500/20 flex items-center gap-2 cursor-pointer shrink-0"
+                    title="Send Full Enquiry on WhatsApp with Selected Dates"
+                  >
+                    <MessageSquare className="w-4 h-4 fill-black text-transparent" />
+                    <span>Full Enquiry on WhatsApp</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -833,15 +944,28 @@ export const BookingModal: React.FC<BookingModalProps> = ({
             <div className="space-y-6">
               <div>
                 <h3 className="text-2xl font-luxury text-white mb-1">
-                  RENTAL SUMMARY & AUTHORIZATION
+                  RENTAL SUMMARY & DEPOSIT AUTHORIZATION
                 </h3>
                 <p className="text-xs text-[#888888]">
-                  Review your itemized ledger with transparent deposit separation.
+                  Review your itemized ledger. Your booking is confirmed only after the first deposit payment is received.
                 </p>
               </div>
 
+              {/* Mandatory Policy Banner */}
+              <div className="p-4 bg-[#C9A45C]/10 border border-[#C9A45C]/30 rounded-2xl flex items-start gap-3.5">
+                <ShieldCheck className="w-5 h-5 text-[#C9A45C] shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="text-xs font-bold uppercase tracking-wider text-[#C9A45C]">
+                    Booking Confirmation Policy
+                  </div>
+                  <p className="text-xs text-[#DDDDDD] leading-relaxed">
+                    Your luxury reservation is <strong className="text-white underline decoration-[#C9A45C]">confirmed only after the first deposit payment</strong> is successfully received. Unpaid reservations remain tentative on a 30-minute hold and may be released if the initial deposit is not authorized.
+                  </p>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                {/* Left: Customer Info & Settlement Structure (7 cols) */}
+                {/* Left: Customer Info & Settlement Structure & Payment Method (7 cols) */}
                 <div className="lg:col-span-7 space-y-4">
                   <div className="p-4 bg-[#111216] border border-white/5 rounded-2xl space-y-3">
                     <span className="text-xs font-semibold uppercase text-[#C9A45C] tracking-wider block">
@@ -882,41 +1006,179 @@ export const BookingModal: React.FC<BookingModalProps> = ({
 
                   {/* Payment structure */}
                   <div className="p-4 bg-[#111216] border border-white/5 rounded-2xl space-y-3">
-                    <span className="text-xs font-semibold uppercase text-[#C9A45C] tracking-wider block">
-                      Select Settlement Structure
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold uppercase text-[#C9A45C] tracking-wider block">
+                        Select Settlement Structure
+                      </span>
+                      <span className="text-[10px] text-[#5ED39A] font-mono-num">
+                        Deposit locks car instantly
+                      </span>
+                    </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div
+                        onClick={() => setPaymentStructure('DEPOSIT')}
+                        className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                          paymentStructure === 'DEPOSIT'
+                            ? 'bg-[#181920] border-[#C9A45C] text-white shadow-md ring-1 ring-[#C9A45C]/30'
+                            : 'bg-[#121316] border-[#222226] text-[#888888] hover:border-[#38383F]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-bold text-white">20% FIRST DEPOSIT</span>
+                          <span className="text-[9px] bg-[#5ED39A]/20 text-[#5ED39A] px-1.5 py-0.5 rounded font-bold uppercase">
+                            Recommended
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-[#888888] mb-2">Pay deposit today to confirm booking. Balance at delivery.</div>
+                        <div className="text-sm font-mono-num font-bold text-[#5ED39A]">
+                          Pay Today: {formatPrice(pricingCalculations.advancePayableToday)}
+                        </div>
+                      </div>
+
                       <div
                         onClick={() => setPaymentStructure('FULL')}
                         className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
                           paymentStructure === 'FULL'
-                            ? 'bg-[#181920] border-[#C9A45C] text-white shadow-md'
+                            ? 'bg-[#181920] border-[#C9A45C] text-white shadow-md ring-1 ring-[#C9A45C]/30'
                             : 'bg-[#121316] border-[#222226] text-[#888888] hover:border-[#38383F]'
                         }`}
                       >
-                        <div className="text-xs font-bold text-white mb-0.5">FULL SETTLEMENT</div>
+                        <div className="text-xs font-bold text-white mb-1">FULL SETTLEMENT</div>
                         <div className="text-[11px] text-[#888888] mb-2">Pay 100% rental now. Zero balance on handover.</div>
                         <div className="text-sm font-mono-num font-bold text-[#C9A45C]">
                           Pay Today: {formatPrice(pricingCalculations.rentalPayableToday)}
                         </div>
                       </div>
+                    </div>
+                  </div>
 
-                      <div
-                        onClick={() => setPaymentStructure('DEPOSIT')}
-                        className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
-                          paymentStructure === 'DEPOSIT'
-                            ? 'bg-[#181920] border-[#C9A45C] text-white shadow-md'
+                  {/* Payment Method Gateway Selection */}
+                  <div className="p-4 bg-[#111216] border border-white/5 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold uppercase text-[#C9A45C] tracking-wider block">
+                        First Deposit Payment Method
+                      </span>
+                      <span className="text-[10px] text-[#5ED39A] font-mono-num flex items-center gap-1">
+                        <Lock className="w-3 h-3" /> 256-Bit SSL Encrypted
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('CARD')}
+                        className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                          paymentMethod === 'CARD'
+                            ? 'bg-[#181920] border-[#C9A45C] text-[#C9A45C] ring-1 ring-[#C9A45C]/30'
                             : 'bg-[#121316] border-[#222226] text-[#888888] hover:border-[#38383F]'
                         }`}
                       >
-                        <div className="text-xs font-bold text-white mb-0.5">20% ADVANCE BOOKING</div>
-                        <div className="text-[11px] text-[#888888] mb-2">Reserve dates today, pay remainder at delivery.</div>
-                        <div className="text-sm font-mono-num font-bold text-[#5ED39A]">
-                          Pay Today: {formatPrice(pricingCalculations.advancePayableToday)}
+                        <CreditCard className="w-4 h-4 mx-auto mb-1" />
+                        <div className="text-[11px] font-bold">VIP Card</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('UPI')}
+                        className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                          paymentMethod === 'UPI'
+                            ? 'bg-[#181920] border-[#C9A45C] text-[#C9A45C] ring-1 ring-[#C9A45C]/30'
+                            : 'bg-[#121316] border-[#222226] text-[#888888] hover:border-[#38383F]'
+                        }`}
+                      >
+                        <QrCode className="w-4 h-4 mx-auto mb-1" />
+                        <div className="text-[11px] font-bold">UPI / QR</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('NETBANKING')}
+                        className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                          paymentMethod === 'NETBANKING'
+                            ? 'bg-[#181920] border-[#C9A45C] text-[#C9A45C] ring-1 ring-[#C9A45C]/30'
+                            : 'bg-[#121316] border-[#222226] text-[#888888] hover:border-[#38383F]'
+                        }`}
+                      >
+                        <Lock className="w-4 h-4 mx-auto mb-1" />
+                        <div className="text-[11px] font-bold">NetBanking</div>
+                      </button>
+                    </div>
+
+                    {paymentMethod === 'CARD' && (
+                      <div className="space-y-2 pt-1 text-xs">
+                        <div>
+                          <label className="block text-[10px] text-[#777777] mb-1">Card Number (Visa / Mastercard / Amex VIP)</label>
+                          <input
+                            type="text"
+                            value={cardNumber}
+                            onChange={e => setCardNumber(e.target.value)}
+                            className="w-full bg-[#17181F] border border-[#2B2C33] rounded-xl px-3 py-2 text-xs text-white font-mono-num"
+                            placeholder="•••• •••• •••• 4242"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] text-[#777777] mb-1">Expiry</label>
+                            <input
+                              type="text"
+                              value={cardExpiry}
+                              onChange={e => setCardExpiry(e.target.value)}
+                              className="w-full bg-[#17181F] border border-[#2B2C33] rounded-xl px-3 py-2 text-xs text-white font-mono-num"
+                              placeholder="MM/YY"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[#777777] mb-1">CVV / Security Code</label>
+                            <input
+                              type="password"
+                              value={cardCvv}
+                              onChange={e => setCardCvv(e.target.value)}
+                              className="w-full bg-[#17181F] border border-[#2B2C33] rounded-xl px-3 py-2 text-xs text-white font-mono-num"
+                              placeholder="•••"
+                            />
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
+
+                    {paymentMethod === 'UPI' && (
+                      <div className="space-y-2 pt-1 text-xs">
+                        <div>
+                          <label className="block text-[10px] text-[#777777] mb-1">Virtual Payment Address (UPI ID)</label>
+                          <input
+                            type="text"
+                            value={upiId}
+                            onChange={e => setUpiId(e.target.value)}
+                            className="w-full bg-[#17181F] border border-[#2B2C33] rounded-xl px-3 py-2 text-xs text-white font-mono-num"
+                            placeholder="username@upi"
+                          />
+                        </div>
+                        <div className="text-[10px] text-[#888888] flex items-center gap-1.5 bg-black/30 p-2.5 rounded-lg border border-white/5">
+                          <Sparkles className="w-3.5 h-3.5 text-[#C9A45C] shrink-0" />
+                          <span>Instant UPI collect request will be triggered for deposit payment. GPay, PhonePe & Paytm supported.</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {paymentMethod === 'NETBANKING' && (
+                      <div className="space-y-2 pt-1 text-xs">
+                        <div>
+                          <label className="block text-[10px] text-[#777777] mb-1">Private Banking Institution</label>
+                          <select
+                            value={netBank}
+                            onChange={e => setNetBank(e.target.value)}
+                            className="w-full bg-[#17181F] border border-[#2B2C33] rounded-xl px-3 py-2 text-xs text-white"
+                          >
+                            <option value="HDFC VIP Private Banking">HDFC Bank (Private Banking)</option>
+                            <option value="ICICI Coral Wealth">ICICI Bank (Wealth Management)</option>
+                            <option value="Axis Burgundy">Axis Bank (Burgundy Private)</option>
+                            <option value="SBI Wealth">State Bank of India (SBI Wealth)</option>
+                            <option value="Standard Chartered Priority">Standard Chartered Priority</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -949,7 +1211,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                     )}
 
                     <div className="flex justify-between">
-                      <span className="text-[#888888]">Protection</span>
+                      <span className="text-[#888888]">Protection Plan</span>
                       <span className="font-mono-num text-white">{formatPrice(pricingCalculations.insuranceFee)}</span>
                     </div>
 
@@ -975,14 +1237,19 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Item 6 Crystal Clear Deposit Box */}
+                  {/* Crystal Clear Deposit Box */}
                   <div className="pt-3 border-t border-white/10 space-y-3">
-                    <div className="p-3 bg-[#111216] rounded-xl border border-white/10">
-                      <div className="flex justify-between items-baseline mb-1">
-                        <span className="text-xs uppercase font-bold text-white tracking-wider">
-                          PAYABLE TODAY
-                        </span>
-                        <span className="text-lg font-luxury font-bold text-[#C9A45C] font-mono-num">
+                    <div className="p-3.5 bg-[#111216] rounded-xl border border-white/10 space-y-2">
+                      <div className="flex justify-between items-baseline">
+                        <div>
+                          <span className="text-[11px] uppercase font-bold text-[#5ED39A] tracking-wider block">
+                            FIRST DEPOSIT DUE TODAY
+                          </span>
+                          <span className="text-[10px] text-[#888888]">
+                            {paymentStructure === 'FULL' ? '100% Full Upfront Settlement' : '20% Advance Booking Deposit'}
+                          </span>
+                        </div>
+                        <span className="text-xl font-luxury font-bold text-[#C9A45C] font-mono-num">
                           {formatPrice(
                             paymentStructure === 'FULL'
                               ? pricingCalculations.rentalPayableToday
@@ -991,12 +1258,21 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                         </span>
                       </div>
 
-                      <div className="flex justify-between items-baseline text-xs text-[#5ED39A] pt-1 border-t border-white/5 font-mono-num">
-                        <span>
-                          {userRewardsTier === 'PLATINUM' ? '₹0 (Platinum VIP 100% Waiver)' : `+ ${formatPrice(pricingCalculations.securityDeposit)}`}
+                      <div className="flex justify-between items-baseline text-xs text-[#AAAAAA] pt-2 border-t border-white/5 font-mono-num">
+                        <span>Refundable Security Deposit:</span>
+                        <span className="text-[#5ED39A]">
+                          {userRewardsTier === 'PLATINUM' ? '₹0 (Platinum VIP Waiver)' : `+ ${formatPrice(pricingCalculations.securityDeposit)}`}
                         </span>
-                        <span>Refundable Security Deposit</span>
                       </div>
+
+                      {paymentStructure === 'DEPOSIT' && (
+                        <div className="flex justify-between items-baseline text-xs text-[#AAAAAA] pt-1 border-t border-white/5 font-mono-num">
+                          <span>Balance Due at Handover:</span>
+                          <span className="text-white font-semibold">
+                            {formatPrice(pricingCalculations.balanceDueHandover)}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Total Authorization */}
@@ -1004,7 +1280,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                       <span className="text-xs uppercase font-bold text-[#888888]">
                         TOTAL AUTHORIZATION
                       </span>
-                      <span className="text-xl font-luxury font-bold text-white font-mono-num">
+                      <span className="text-lg font-luxury font-bold text-white font-mono-num">
                         {formatPrice(
                           paymentStructure === 'FULL'
                             ? pricingCalculations.totalAuthorization
@@ -1013,124 +1289,317 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                       </span>
                     </div>
 
-                    <p className="text-[11px] text-[#777777] italic leading-tight px-1">
-                      * Security deposit refunded after vehicle inspection, subject to rental terms.
-                    </p>
+                    <div className="p-2.5 bg-black/40 rounded-xl border border-white/5 text-[11px] text-[#888888] leading-tight">
+                      <strong className="text-[#C9A45C]">Booking Rule:</strong> Vehicle reservation is 100% locked and officially confirmed only upon first deposit authorization.
+                    </div>
                   </div>
 
-                  {/* Payment CTA */}
+                  {/* Primary Payment CTA - Pay Deposit to Confirm */}
                   <button
                     type="button"
-                    onClick={handleProcessPayment}
+                    onClick={() => handleProcessPayment(false)}
                     disabled={isProcessingPayment}
-                    className="w-full py-4 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-xl shadow-[#C9A45C]/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                    className="w-full py-4 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-xl shadow-[#C9A45C]/25 flex flex-col items-center justify-center gap-0.5 cursor-pointer disabled:opacity-50"
                   >
                     {isProcessingPayment ? (
-                      <span>Authorizing with Gateway...</span>
+                      <span className="py-1">{processingStatusText}</span>
                     ) : (
                       <>
-                        <span>AUTHORIZE & CONFIRM DRIVE</span>
-                        <ArrowRight className="w-4 h-4" />
+                        <div className="flex items-center gap-2">
+                          <span>PAY FIRST DEPOSIT & CONFIRM BOOKING</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </div>
+                        <span className="text-[10px] font-normal opacity-85">
+                          {formatPrice(paymentStructure === 'FULL' ? pricingCalculations.rentalPayableToday : pricingCalculations.advancePayableToday)} · Instant Confirmation
+                        </span>
                       </>
                     )}
+                  </button>
+
+                  {/* Secondary Option: Place on 30-Min Hold (Pay Deposit Later) */}
+                  <button
+                    type="button"
+                    onClick={() => handleProcessPayment(true)}
+                    disabled={isProcessingPayment}
+                    className="w-full py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-[#CCCCCC] hover:text-white font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Clock className="w-3.5 h-3.5 text-[#C9A45C]" />
+                    <span>Place on 30-Min Hold (Pay Deposit Later)</span>
+                  </button>
+
+                  {/* Direct WhatsApp Full Enquiry Alternative Button */}
+                  <button
+                    type="button"
+                    onClick={() => openWhatsAppEnquiry({
+                      vehicleName: vehicle.name,
+                      category: vehicle.category,
+                      pickupDate,
+                      pickupTime,
+                      returnDate,
+                      returnTime,
+                      pickupLocation: locations.find(l => l.id === pickupLocId)?.name || 'Selected VIP Hub',
+                      dropoffLocation: sameDropoff
+                        ? locations.find(l => l.id === pickupLocId)?.name
+                        : locations.find(l => l.id === dropoffLocId)?.name,
+                      driverOption,
+                      totalAmount: paymentStructure === 'FULL'
+                        ? pricingCalculations.rentalPayableToday
+                        : pricingCalculations.advancePayableToday,
+                      currency,
+                      customerName,
+                      customerPhone,
+                      customerEmail,
+                      depositPaid: false,
+                      depositAmount: paymentStructure === 'FULL' ? pricingCalculations.rentalPayableToday : pricingCalculations.advancePayableToday,
+                      customNote: `Protection: ${protectionPlan}. Payment preference: ${paymentStructure === 'FULL' ? 'Full Settlement' : '20% First Deposit'}. Booking confirmed only after first deposit payment.`,
+                      enquiryType: 'FULL_ENQUIRY'
+                    })}
+                    className="w-full py-3 bg-emerald-950/70 hover:bg-emerald-900/90 border border-emerald-500/50 hover:border-emerald-400 text-emerald-200 hover:text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-950/40"
+                    title="Send selected dates, vehicle details and quotation directly to VIP Concierge on WhatsApp"
+                  >
+                    <MessageSquare className="w-4 h-4 text-emerald-400" />
+                    <span>Send Full Enquiry via WhatsApp</span>
                   </button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* STEP 7: CONFIRMATION & DIGITAL RENTAL PASS (Item 8) */}
+          {/* STEP 7: CONFIRMATION OR TENTATIVE HOLD SCREEN */}
           {step === 7 && confirmedBooking && (
             <div className="py-6 text-center max-w-xl mx-auto space-y-6">
-              <div className="w-16 h-16 rounded-full bg-[#5ED39A]/15 border-2 border-[#5ED39A] mx-auto flex items-center justify-center animate-bounce">
-                <CheckCircle2 className="w-8 h-8 text-[#5ED39A]" />
-              </div>
-
-              <div>
-                <h3 className="text-3xl font-luxury text-white mb-1">
-                  BOOKING CONFIRMED
-                </h3>
-                <p className="text-xs text-[#AAAAAA]">
-                  Your reservation reference is <strong className="text-[#C9A45C] font-mono-num">#{confirmedBooking.id}</strong>. Handover instructions and digital pass are ready.
-                </p>
-              </div>
-
-              {/* YOUR PICKUP Experience Card (Item 8) */}
-              <div className="p-5 bg-[#101115] border border-white/10 rounded-2xl text-left space-y-3">
-                <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                  <span className="text-xs font-bold text-[#C9A45C] uppercase">YOUR PICKUP</span>
-                  <span className="text-xs font-mono-num text-[#5ED39A] font-bold">PASS ISSUED ✓</span>
-                </div>
-
-                <div className="space-y-1 text-xs text-[#DDDDDD]">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-3.5 h-3.5 text-[#C9A45C]" />
-                    <span>{confirmedBooking.pickupLocation}</span>
+              {confirmedBooking.status === 'CONFIRMED' ? (
+                <>
+                  {/* Status 1: DEPOSIT PAID & CONFIRMED */}
+                  <div className="w-16 h-16 rounded-full bg-[#5ED39A]/15 border-2 border-[#5ED39A] mx-auto flex items-center justify-center animate-bounce">
+                    <CheckCircle2 className="w-8 h-8 text-[#5ED39A]" />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-3.5 h-3.5 text-[#C9A45C]" />
-                    <span>{confirmedBooking.pickupDate} at {confirmedBooking.pickupTime}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Car className="w-3.5 h-3.5 text-[#C9A45C]" />
-                    <span>Vehicle: <strong>{confirmedBooking.vehicleName}</strong></span>
-                  </div>
-                </div>
 
-                <div className="p-3 bg-[#16171E] rounded-xl flex items-center justify-between font-mono-num text-xs">
-                  <span className="text-[#777777]">Handover Pickup Code:</span>
-                  <span className="text-[#C9A45C] font-bold text-sm">#{confirmedBooking.id}</span>
-                </div>
-              </div>
-
-              {/* Velox Rewards Points Credited Banner */}
-              <div className="p-4 bg-gradient-to-r from-[#171A21] via-[#101217] to-[#171A21] border border-[#C9A45C]/40 rounded-2xl flex items-center justify-between text-left">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-[#C9A45C]/15 border border-[#C9A45C]/30 flex items-center justify-center text-[#C9A45C]">
-                    <Crown className="w-5 h-5" />
-                  </div>
                   <div>
-                    <div className="text-xs font-bold text-white uppercase tracking-wider">
-                      Velox Rewards Points Credited!
+                    <span className="text-[10px] font-mono-num uppercase tracking-widest text-[#5ED39A] bg-[#5ED39A]/10 px-3 py-1 rounded-full font-bold">
+                      FIRST DEPOSIT RECEIVED ✓
+                    </span>
+                    <h3 className="text-3xl font-luxury text-white mt-2 mb-1">
+                      BOOKING CONFIRMED
+                    </h3>
+                    <p className="text-xs text-[#AAAAAA]">
+                      Your reservation reference is <strong className="text-[#C9A45C] font-mono-num">#{confirmedBooking.id}</strong>. Vehicle schedule is officially locked.
+                    </p>
+                  </div>
+
+                  {/* Deposit Payment Receipt Card */}
+                  <div className="p-4 bg-gradient-to-r from-[#111216] to-[#15171E] border border-[#5ED39A]/30 rounded-2xl text-left space-y-2 font-mono-num text-xs">
+                    <div className="flex items-center justify-between border-b border-white/5 pb-2 text-[11px]">
+                      <span className="text-[#888888]">PAYMENT STATUS:</span>
+                      <span className="text-[#5ED39A] font-bold">FIRST DEPOSIT AUTHORIZED</span>
                     </div>
-                    <div className="text-[11px] text-[#888888]">
-                      Tier status: <strong className="text-[#C9A45C]">{tierConfig.name}</strong> • Added to your client profile
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#888888]">Amount Paid Today:</span>
+                      <span className="text-white font-bold">{formatPrice(confirmedBooking.paidAmount)}</span>
+                    </div>
+                    {confirmedBooking.depositTransactionId && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#888888]">Gateway Ref:</span>
+                        <span className="text-[#C9A45C]">{confirmedBooking.depositTransactionId}</span>
+                      </div>
+                    )}
+                    {confirmedBooking.balanceAmount > 0 && (
+                      <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                        <span className="text-[#888888]">Remaining Balance (at delivery):</span>
+                        <span className="text-[#DDDDDD]">{formatPrice(confirmedBooking.balanceAmount)}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* YOUR PICKUP Experience Card */}
+                  <div className="p-5 bg-[#101115] border border-white/10 rounded-2xl text-left space-y-3">
+                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                      <span className="text-xs font-bold text-[#C9A45C] uppercase">YOUR PICKUP</span>
+                      <span className="text-xs font-mono-num text-[#5ED39A] font-bold">PASS ISSUED ✓</span>
+                    </div>
+
+                    <div className="space-y-1 text-xs text-[#DDDDDD]">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-3.5 h-3.5 text-[#C9A45C]" />
+                        <span>{confirmedBooking.pickupLocation}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-3.5 h-3.5 text-[#C9A45C]" />
+                        <span>{confirmedBooking.pickupDate} at {confirmedBooking.pickupTime}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Car className="w-3.5 h-3.5 text-[#C9A45C]" />
+                        <span>Vehicle: <strong>{confirmedBooking.vehicleName}</strong></span>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-[#16171E] rounded-xl flex items-center justify-between font-mono-num text-xs">
+                      <span className="text-[#777777]">Handover Pickup Code:</span>
+                      <span className="text-[#C9A45C] font-bold text-sm">#{confirmedBooking.id}</span>
                     </div>
                   </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-base font-mono-num font-bold text-[#5ED39A]">
-                    +{pricingCalculations.pointsToEarn.totalPoints.toLocaleString()} PTS
+
+                  {/* Velox Rewards Points Credited Banner */}
+                  <div className="p-4 bg-gradient-to-r from-[#171A21] via-[#101217] to-[#171A21] border border-[#C9A45C]/40 rounded-2xl flex items-center justify-between text-left">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-[#C9A45C]/15 border border-[#C9A45C]/30 flex items-center justify-center text-[#C9A45C]">
+                        <Crown className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-white uppercase tracking-wider">
+                          Velox Rewards Points Credited!
+                        </div>
+                        <div className="text-[11px] text-[#888888]">
+                          Tier status: <strong className="text-[#C9A45C]">{tierConfig.name}</strong> • Added to your client profile
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-base font-mono-num font-bold text-[#5ED39A]">
+                        +{pricingCalculations.pointsToEarn.totalPoints.toLocaleString()} PTS
+                      </div>
+                      <span className="text-[10px] text-[#888888] font-mono-num">Credited</span>
+                    </div>
                   </div>
-                  <span className="text-[10px] text-[#888888] font-mono-num">Credited</span>
-                </div>
-              </div>
 
-              {/* Action Buttons */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onOpenPass?.(confirmedBooking);
-                  }}
-                  className="py-3 px-4 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <QrCode className="w-4 h-4" />
-                  <span>View Digital Rental Pass</span>
-                </button>
+                  {/* Action Buttons */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenPass?.(confirmedBooking);
+                      }}
+                      className="py-3 px-4 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      <span>View Digital Rental Pass</span>
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onOpenMyBookings();
-                  }}
-                  className="py-3 px-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold text-xs rounded-xl transition-colors cursor-pointer"
-                >
-                  Go to Client Portal
-                </button>
-              </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenMyBookings();
+                      }}
+                      className="py-3 px-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                    >
+                      Go to Client Portal
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openWhatsAppEnquiry({
+                        bookingId: confirmedBooking.id,
+                        vehicleName: confirmedBooking.vehicleName,
+                        pickupDate: confirmedBooking.pickupDate,
+                        pickupTime: confirmedBooking.pickupTime,
+                        returnDate: confirmedBooking.returnDate,
+                        returnTime: confirmedBooking.returnTime,
+                        pickupLocation: confirmedBooking.pickupLocation,
+                        customerName: confirmedBooking.customerName,
+                        customerPhone: confirmedBooking.customerPhone,
+                        totalAmount: confirmedBooking.total,
+                        currency,
+                        depositPaid: true,
+                        depositAmount: confirmedBooking.paidAmount,
+                        enquiryType: 'BOOKING_CONFIRMATION'
+                      })}
+                      className="sm:col-span-2 py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                      title="Direct VIP Concierge WhatsApp booking confirmation"
+                    >
+                      <MessageSquare className="w-4 h-4 fill-black text-transparent" />
+                      <span>Send Confirmation to VIP Concierge WhatsApp</span>
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Status 2: AWAITING FIRST DEPOSIT (UNCONFIRMED) */}
+                  <div className="w-16 h-16 rounded-full bg-amber-500/15 border-2 border-amber-500 mx-auto flex items-center justify-center animate-pulse">
+                    <AlertCircle className="w-8 h-8 text-amber-400" />
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-mono-num uppercase tracking-widest text-amber-400 bg-amber-500/15 px-3 py-1 rounded-full font-bold">
+                      AWAITING FIRST DEPOSIT · UNCONFIRMED
+                    </span>
+                    <h3 className="text-3xl font-luxury text-white mt-2 mb-1">
+                      TENTATIVE RESERVATION ON HOLD
+                    </h3>
+                    <p className="text-xs text-[#AAAAAA]">
+                      Reference <strong className="text-[#C9A45C] font-mono-num">#{confirmedBooking.id}</strong> is placed on temporary 30-minute hold.
+                    </p>
+                  </div>
+
+                  {/* Explicit Confirmation Policy Warning Box */}
+                  <div className="p-5 bg-amber-950/25 border border-amber-500/40 rounded-2xl text-left space-y-2">
+                    <div className="flex items-center gap-2 text-amber-300 font-bold text-xs uppercase">
+                      <Lock className="w-4 h-4 text-amber-400" />
+                      <span>Booking Policy: Confirmed Only After First Deposit</span>
+                    </div>
+                    <p className="text-xs text-[#DDDDDD] leading-relaxed">
+                      Your reserved vehicle ({confirmedBooking.vehicleName}) will remain on temporary grace hold. To guarantee your rental dates and officially confirm this reservation, please complete the first deposit payment of <strong className="text-amber-300 font-mono-num">{formatPrice(confirmedBooking.depositAmount || pricingCalculations.advancePayableToday)}</strong>.
+                    </p>
+                  </div>
+
+                  {/* Immediate Action: Pay First Deposit to Confirm */}
+                  <button
+                    type="button"
+                    onClick={handlePayStep7Deposit}
+                    disabled={isProcessingPayment}
+                    className="w-full py-4 bg-[#C9A45C] hover:bg-[#DFBD78] text-[#050505] font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-xl shadow-[#C9A45C]/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isProcessingPayment ? (
+                      <span>{processingStatusText}</span>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4 text-black" />
+                        <span>PAY FIRST DEPOSIT NOW ({formatPrice(confirmedBooking.depositAmount || pricingCalculations.advancePayableToday)}) & CONFIRM</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Secondary Portal & WhatsApp actions */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenMyBookings();
+                      }}
+                      className="py-3 px-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                    >
+                      View in Client Portal
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openWhatsAppEnquiry({
+                        bookingId: confirmedBooking.id,
+                        vehicleName: confirmedBooking.vehicleName,
+                        pickupDate: confirmedBooking.pickupDate,
+                        pickupTime: confirmedBooking.pickupTime,
+                        returnDate: confirmedBooking.returnDate,
+                        returnTime: confirmedBooking.returnTime,
+                        pickupLocation: confirmedBooking.pickupLocation,
+                        customerName: confirmedBooking.customerName,
+                        customerPhone: confirmedBooking.customerPhone,
+                        totalAmount: confirmedBooking.total,
+                        currency,
+                        depositPaid: false,
+                        depositAmount: confirmedBooking.depositAmount || pricingCalculations.advancePayableToday,
+                        customNote: `Booking #${confirmedBooking.id} is awaiting first deposit payment. Please assist with deposit settlement.`,
+                        enquiryType: 'FULL_ENQUIRY'
+                      })}
+                      className="py-3 px-4 bg-emerald-950/70 hover:bg-emerald-900/90 border border-emerald-500/50 text-emerald-200 font-bold text-xs uppercase rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <MessageSquare className="w-4 h-4 text-emerald-400" />
+                      <span>Concierge WhatsApp Support</span>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
